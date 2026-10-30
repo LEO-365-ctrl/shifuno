@@ -23,7 +23,8 @@
 :root[data-theme="light"]{color-scheme:light}
 *{box-sizing:border-box}
 html,body{height:100%;margin:0}
-body{background:light-dark(#f3eff1,#1a1a1a);font-family:-apple-system,BlinkMacSystemFont,'Hiragino Sans','Segoe UI','Noto Sans JP',sans-serif;-webkit-text-size-adjust:100%}
+/* スマホではアプリと同じ色（iPhone のホーム画面アプリは、時計の帯をこの色で塗る）。デスクトップの外側の色は下のメディアクエリ */
+body{background:light-dark(#fffaf8,#2c2525);font-family:-apple-system,BlinkMacSystemFont,'Hiragino Sans','Segoe UI','Noto Sans JP',sans-serif;-webkit-text-size-adjust:100%}
 button{font:inherit;color:inherit;-webkit-tap-highlight-color:transparent}
 button:focus-visible{outline:2px solid var(--accent);outline-offset:3px}
 svg.icon{width:17px;height:17px;fill:none;stroke:currentColor;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
@@ -479,7 +480,7 @@ svg.icon{width:17px;height:17px;fill:none;stroke:currentColor;stroke-width:1.8;s
 
 /* ---- デスクトップではスマホ枠で表示 ---- */
 @media (min-width:600px){
-  body{display:flex;align-items:center;justify-content:center;min-height:100%;
+  body{display:flex;align-items:center;justify-content:center;min-height:100%;background-color:light-dark(#f3eff1,#1a1a1a);
     background-image:radial-gradient(light-dark(#00000018,#ffffff12) 1px,transparent 1.2px);background-size:22px 22px}
   .app{width:390px;height:min(844px,calc(100vh - 48px));border:1px solid var(--line);border-radius:30px;box-shadow:0 12px 45px #0000001f}
   .sheet-scroll{padding-bottom:34px}

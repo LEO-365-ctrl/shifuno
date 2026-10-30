@@ -3,7 +3,7 @@
 // ・版（VERSION）は tools/stamp.cjs がファイルの中身から決める。中身が変わると新しい版を丸ごと受け取り、古い版は消す。
 // ・version.json は端末の時計の確認用なので、いつも公開先へ取りに行く。
 'use strict';
-const VERSION = '674c43fb7c';
+const VERSION = 'e283cf7fa0';
 const FILES = ["./","app.js","boot.js","holidays.js","icons/apple-touch-icon.png","icons/icon-192.png","icons/icon-512.png","icons/maskable-512.png","image-entry.js","image-reader.js","index.html","local-store.js","manifest.webmanifest","name-ocr.js","seed.js"];
 const CACHE = `shift-app-${VERSION}`;
 // 文字認識の部品（約6MB）は初めて使うときに取り、版と別に残す（アプリを更新しても取り直さない）。部品を入れ替えたらこの名前を変える。

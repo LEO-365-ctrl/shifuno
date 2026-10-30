@@ -261,7 +261,14 @@ function goToDay(key, d) {
   const from = dayIndex(state.view, state.selected), to = dayIndex(key, d);
   if (to < 0 || from === to) return;
   const dir = to > from ? 1 : -1;
-  if (key !== state.view) { state.view = key; state.selected = d; renderMonth(); buildStrip(); } else select(d);
+  if (key !== state.view) {
+    // 月をまたぐとストリップを前後の月ごと作り直す（並ぶ日付が1か月ずれる）。いま選んでいる日付を目印に
+    // スクロール位置と選択の丸の位置を引き継ぎ、同じ月の中と同じ動きで目的の日へ送る。
+    const prev = { key: state.view, d: state.selected }, anchor = chipOf(prev.key, prev.d), offset = anchor && anchor.offsetLeft - strip.scrollLeft;
+    state.view = key; state.selected = d; renderMonth(); buildStrip();
+    const same = anchor && chipOf(prev.key, prev.d);
+    if (same) { strip.scrollTo({ left: same.offsetLeft - offset, behavior: 'instant' }); indicatorX = same.querySelector('.cn').offsetLeft; }
+  } else select(d);
   renderSheet('switch', dir);
 }
 let suppressChip = false;
