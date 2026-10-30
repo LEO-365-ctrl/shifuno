@@ -1744,6 +1744,22 @@ function setMe(id, leaving = null) {
     try { if (id) localStorage.setItem('shift-me', id); else localStorage.removeItem('shift-me'); } catch {}
   });
   navigator.vibrate?.(id ? [10, 40, 16] : 8);
+  // 右へ払い切って解除したとき（設定の逆）：跡の帯は下へ縮みながら空になった自分の欄の案内を見せ、
+  // 案内は左から戻り、外した人は一覧の元の位置へ右の外から入る。下の行は flipRender で場所を空ける。
+  if (!id && gap) {
+    closeGap(gap);
+    const hintNow = peopleEl.querySelector('.me-empty'), back = peopleEl.querySelector(`.person[data-id="${CSS.escape(leaving.dataset.id)}"]`);
+    if (hintNow) {
+      hintNow.getAnimations().forEach(a => a.cancel());
+      hintNow.animate([{ opacity: 0, transform: 'translateX(-22px)' }, { opacity: 1, transform: 'none' }], { duration: 380, delay: 140, easing: EASE, fill: 'backwards' });
+    }
+    if (back) {
+      back.getAnimations().forEach(a => a.cancel());
+      back.animate([{ transform: `translateX(${back.offsetWidth + 24}px)` }, { transform: 'translateX(-10px)', offset: .6 }, { transform: 'translateX(3px)', offset: .82 }, { transform: 'none' }],
+        { duration: 640, delay: 90, easing: 'cubic-bezier(.2,.7,.3,1)', fill: 'backwards' });
+    }
+    return;
+  }
   if (reduced() || !id) return;
   const row = peopleEl.querySelector('.person.is-me');
   row.getAnimations().forEach(a => a.cancel());
@@ -1996,19 +2012,20 @@ function runRowAction(li) {
   openRow = null; li.classList.remove('opened');
   settleRow(li, rowOffset(li), 0, go);
 }
-// 右へ払い切って「自分」に設定：行は戻らずに離した勢いのまま右へ抜け、後ろの「自分」の帯が行いっぱいに広がる。
-// 抜けきったら setMe へ渡し、空いた所を詰めて、自分の欄へ右の外から入ってくる。
+// 右へ払い切って「自分」に設定（自分の行なら解除）：行は戻らずに離した勢いのまま右へ抜け、後ろの帯が行いっぱいに広がる。
+// 抜けきったら setMe へ渡し、空いた所を詰めて、行き先（自分の欄／一覧の元の位置）へ右の外から入ってくる。
 function swipeToMe(li, x, v) {
   openRow = null; li.classList.remove('opened'); li.classList.add('full');
   const to = li.offsetWidth + 24, dist = Math.max(1, to - x);
   // 出だしの速さを指の速さに合わせ、だんだん緩める（速く払うほど早く抜ける）。
-  const dur = Math.max(180, Math.min(320, 1.6 * dist / Math.max(.8, v)));
+  // 払い終わりに指が止まりかけていても、もたつかずに抜けるよう最低限の速さを持たせる。
+  const dur = Math.max(120, Math.min(200, 1.6 * dist / Math.max(1.6, v)));
   const ease = k => 1 - (1 - k) ** 1.6, t0 = performance.now();
   li.querySelector('.sa-ic').animate([{ scale: '1' }, { scale: '1.18' }, { scale: '1' }], { duration: 360, easing: EASE });
   const tick = t => {
     const k = Math.min(1, (t - t0) / dur);
     paintRow(li, x + dist * ease(k));
-    if (k < 1 && li.isConnected) requestAnimationFrame(tick); else if (li.isConnected) setMe(li.dataset.id, li);
+    if (k < 1 && li.isConnected) requestAnimationFrame(tick); else if (li.isConnected) setMe(li.dataset.id === meId ? null : li.dataset.id, li);
   };
   requestAnimationFrame(tick);
 }
@@ -2056,7 +2073,7 @@ function endRowSwipe(e, cancelled) {
   drawerSuppress = true; setTimeout(() => { drawerSuppress = false; }, 0);
   s.li.classList.remove('swiping', 'full');
   const v = performance.now() - s.lastT < 100 ? s.v : 0, x = s.dx;
-  if (!cancelled && s.full) { if (s.id === meId || reduced()) runRowAction(s.li); else swipeToMe(s.li, x, v); return; }
+  if (!cancelled && s.full) { if (reduced()) runRowAction(s.li); else swipeToMe(s.li, x, v); return; }
   // 右へ払う勢いがあれば開く、左へ払えば閉じる。どちらでもなければ位置で決める。
   const open = !cancelled && (v > .5 ? x > 24 : v < -.5 ? false : x >= SA_OPEN_AT);
   if (open) { openRowAt(s.li); settleRow(s.li, x, SA_OPEN); }
