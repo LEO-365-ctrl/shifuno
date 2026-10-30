@@ -1452,9 +1452,11 @@ function applyPersonResult(r, fromId, before) {
   }
   navigator.vibrate?.([10, 40, 16]);
   const m = r.merged;
-  showToast({ text: m
+  // お知らせは、ほかの「保存済み」と同じく残り時間の線を見せて自動で消す（warn / saving でないものは自分で消す時間を決める）。
+  const toast = showToast({ text: m
     ? `「${esc(before)}」さんを「${esc(m.name)}」さんにまとめました${m.months.length ? `<br><small>${m.months.map(k => `${parseKey(k)[1]}月`).join('・')}のシフトを移しました${m.conflicts ? `（重なった${m.conflicts}日は「${esc(m.name)}」さんの記号のまま）` : ''}</small>` : ''}`
     : `名前を「${esc(r.renamed.name)}」に直しました<br><small>「${esc(before)}」で登録しても、同じ人に入ります</small>` });
+  hideToastLater(toast, 5000);
 }
 $('.rename-yes').addEventListener('click', submitRename);
 $('.rename-no').addEventListener('click', closeRename);
