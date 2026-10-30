@@ -271,6 +271,7 @@ function createLocal(adapter, { seed, now = () => Date.now() } = {}) {
         if (p === '/api/cell') return local.editCell(body);
         if (p === '/api/commit') return local.commit(body);
         if (p === '/api/image-draft') return local.saveDraft(body);
+        if (p === '/api/person') return local.renamePerson(body);
         if (p === '/api/reader-learn') { const next = structuredClone(data); next.reader = learnReader(data.reader, body, data.codes, data.people); await save(next); return { data: structuredClone(data) }; }
         if (p === '/api/images') return local.receiveImages(body.files);
       }
@@ -283,6 +284,48 @@ function createLocal(adapter, { seed, now = () => Date.now() } = {}) {
       next.self = id;
       if (!Object.values(next.months).some(m => m.shifts.me)) next.people = next.people.filter(p => p.id !== 'me');
       await save(next); return structuredClone(data);
+    },
+    // 名前を直す。ほかの人と同じ名前にしたときは、まず conflict を返して確かめ、merge で「同じ人」としてまとめる。
+    // ・直す前の名前は別名として残す（読み取りや入力で同じ間違いをしても、次から同じ人に入る）。
+    // ・まとめると、シフトは月ごとに移し、同じ日が両方にあれば残す側（target）を優先する。終わった月も人の付け替えだけは行う。
+    async renamePerson({ id, name, revision, merge = false }) {
+      if (revision !== data.revision) fail('別の画面から更新されています。最新の内容を読み込みました。', 409);
+      if (!data.people.some(x => x.id === id)) fail('メンバーが見つかりません。', 404);
+      name = typeof name === 'string' ? name.normalize('NFKC').trim().replace(/\s+/g, ' ') : '';
+      if (!name || name.length > 40 || /[<>\x00-\x1f]/.test(name)) fail('名前は1〜40文字で入力してください（< > は使えません）。');
+      const key = normal(name);
+      // 「自分」は画面の言葉（自分の欄・自分の札）と紛らわしいので、仮の「自分」以外には付けない。
+      if (key === '自分' && id !== 'me') fail('「自分」はメンバーの名前には使えません。');
+      const other = data.people.find(x => x.id !== id && [x.name, ...x.aliases].some(a => normal(a) === key));
+      const shiftMonths = pid => Object.keys(data.months).filter(k => data.months[k].shifts[pid]).sort();
+      if (other && !merge) return { conflict: { id: other.id, name: other.name, months: shiftMonths(id) } };
+      const next = structuredClone(data), src = next.people.find(x => x.id === id);
+      const uniq = list => { const seen = new Set(); return list.filter(a => a && !seen.has(normal(a)) && seen.add(normal(a))); };
+      const oldNames = src.id === 'me' ? src.aliases : [src.name, ...src.aliases];
+      if (!other) {
+        if (src.name === name) return { data: structuredClone(data), unchanged: true };
+        src.aliases = uniq([...oldNames, name]); src.name = name;
+        await save(next); return { data: structuredClone(data), renamed: { id, name } };
+      }
+      const tgt = next.people.find(x => x.id === other.id);
+      tgt.aliases = uniq([...tgt.aliases, tgt.name, ...oldNames]);
+      let conflicts = 0;
+      const months = shiftMonths(id);
+      for (const m of Object.values(next.months)) {
+        const s = m.shifts[id]; if (!s) continue;
+        const t = m.shifts[tgt.id];
+        if (!t) m.shifts[tgt.id] = s;
+        else {
+          const b = s.split(/\s+/);
+          m.shifts[tgt.id] = t.split(/\s+/).map((c, i) => { if (c === '?' && b[i] && b[i] !== '?') return b[i]; if (b[i] && b[i] !== '?' && b[i] !== c) conflicts++; return c; }).join(' ');
+        }
+        delete m.shifts[id];
+      }
+      next.people = next.people.filter(x => x.id !== id);
+      if (next.self === id) next.self = tgt.id;
+      if (next.reader?.names?.[id]) { next.reader.names[tgt.id] ??= next.reader.names[id]; delete next.reader.names[id]; }
+      if (Array.isArray(next.reader?.order)) { const has = next.reader.order.includes(tgt.id); next.reader.order = next.reader.order.map(x => x === id ? (has ? null : tgt.id) : x); }
+      await save(next); return { data: structuredClone(data), merged: { from: id, to: tgt.id, name: tgt.name, months, conflicts } };
     },
     async editCell({ key, day, id, code, revision }) {
       if (revision !== data.revision) fail('別の画面から更新されています。最新の内容を読み込みました。', 409);

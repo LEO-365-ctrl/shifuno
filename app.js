@@ -1353,6 +1353,117 @@ overwriteModal.addEventListener('cancel', e => { e.preventDefault(); dismissOver
 // Keep Escape/Tab inside this native modal instead of the importer underneath it.
 overwriteModal.addEventListener('keydown', e => { e.stopPropagation(); });
 
+// ---- 名前を直す（メンバー一覧で左へスワイプ）。上書き確認と同じ見た目の小さな画面 ----
+// ほかの人と同じ名前にしたときは、同じ画面のまま「同じ人としてまとめますか？」に切り替えて確かめる。
+const renameModal = $('.rename-modal'), renameInput = $('.rename-input');
+let renaming = null, renameBusy = false;
+function renameStep(merge) {
+  const p = people.find(x => x.id === renaming.id), c = renaming.conflict;
+  renameModal.classList.toggle('is-merge', merge);
+  $('.rename-title').textContent = merge ? '同じ人としてまとめますか？' : '名前を直す';
+  renameInput.hidden = merge;
+  $('.rename-months').hidden = !merge || !c.months.length;
+  $('.rename-months').innerHTML = merge ? c.months.map(key => `<span>${esc(fmtMonth(key))}</span>`).join('') : '';
+  $('.rename-description').innerHTML = merge
+    ? `「${esc(p.name)}」さんを「${esc(c.name)}」さんにまとめます。<br>${c.months.length ? `シフトは「${esc(c.name)}」さんに移ります。<br>` : ''}「${esc(p.name)}」の名前で登録しても、<br>次からは「${esc(c.name)}」さんに入ります。`
+    : '登録した名前の間違いを直せます。<br>ほかのメンバーと同じ名前にすると、<br>ひとりにまとめられます。';
+  $('.rename-yes').textContent = merge ? 'まとめる' : '直す';
+  $('.rename-error').textContent = '';
+}
+function openRename(id) {
+  const p = people.find(x => x.id === id);
+  if (!p || renameModal.open) return;
+  renaming = { id, conflict: null }; renameBusy = false;
+  renameModal.classList.remove('is-closing');
+  renameModal.querySelectorAll('button').forEach(b => { b.disabled = false; });
+  renameStep(false);
+  renameInput.value = p.name;
+  renameModal.showModal();
+  renameInput.focus({ preventScroll: true }); renameInput.select();
+  if (reduced()) return;
+  renameModal.animate([{ opacity: 0, transform: 'translateY(22px) scale(.96)' }, { opacity: 1, transform: 'none' }], { duration: 380, easing: 'cubic-bezier(.22,1,.36,1)' });
+  $('.rename-emblem').animate([{ transform: 'rotate(-24deg) scale(.75)' }, { transform: 'none' }], { duration: 520, easing: 'cubic-bezier(.34,1.3,.64,1)' });
+  renameModal.querySelectorAll('h2,.rename-input,.rename-description,.rename-modal .overwrite-buttons').forEach((el, i) => {
+    el.animate([{ opacity: 0, transform: 'translateY(7px)' }, { opacity: 1, transform: 'none' }], { duration: 300, delay: 60 + i * 35, easing: EASE, fill: 'backwards' });
+  });
+}
+async function closeRename() {
+  if (!renameModal.open || renameModal.classList.contains('is-closing')) return;
+  renameModal.classList.add('is-closing');
+  renameModal.querySelectorAll('button').forEach(b => { b.disabled = true; });
+  if (!reduced()) await renameModal.animate([{ opacity: 1, transform: 'none' }, { opacity: 0, transform: 'translateY(10px) scale(.98)' }],
+    { duration: 180, easing: 'cubic-bezier(.4,0,1,1)' }).finished.catch(() => {});
+  renameModal.close(); renameModal.classList.remove('is-closing');
+  const li = renaming && peopleEl.querySelector(`.person[data-id="${CSS.escape(renaming.to ?? renaming.id)}"] .pick`);
+  renaming = null; li?.focus({ preventScroll: true });
+}
+async function submitRename() {
+  if (!renaming || renameBusy) return;
+  const { id } = renaming, before = people.find(x => x.id === id)?.name ?? '';
+  renameBusy = true;
+  renameModal.querySelectorAll('button').forEach(b => { b.disabled = true; });
+  try {
+    const r = await api('/api/person', { id, name: renameInput.value, revision: DATA.revision, merge: !!renaming.conflict });
+    if (r.conflict) {
+      renaming.conflict = r.conflict;
+      // 入力欄から確認の文へ、内容だけを入れ替える（画面は閉じない）。
+      const parts = renameModal.querySelectorAll('h2,.rename-description');
+      if (!reduced()) await Promise.all([...parts].map(el => el.animate([{ opacity: 1, transform: 'none' }, { opacity: 0, transform: 'translateY(-6px)' }], { duration: 140, easing: 'ease-in', fill: 'forwards' }).finished));
+      renameStep(true);
+      if (!reduced()) {
+        renameModal.querySelectorAll('h2,.rename-months,.rename-description').forEach((el, i) => {
+          el.getAnimations().forEach(a => a.cancel());
+          el.animate([{ opacity: 0, transform: 'translateY(8px)' }, { opacity: 1, transform: 'none' }], { duration: 320, delay: i * 45, easing: EASE, fill: 'backwards' });
+        });
+        $('.rename-emblem').animate([{ transform: 'scale(1)' }, { transform: 'scale(1.12)', offset: .4 }, { transform: 'none' }], { duration: 420, easing: EASE });
+      }
+      $('.rename-yes').focus({ preventScroll: true });
+      return;
+    }
+    renaming.to = r.merged?.to ?? id;
+    await closeRename();
+    applyPersonResult(r, id, before);
+  } catch (e) {
+    $('.rename-error').textContent = e.message || '名前を直せませんでした。';
+    if (!reduced()) renameModal.querySelector(renameInput.hidden ? '.rename-error' : '.rename-input').animate(
+      [{ transform: 'none' }, { transform: 'translateX(-6px)' }, { transform: 'translateX(5px)' }, { transform: 'translateX(-3px)' }, { transform: 'none' }], { duration: 320, easing: 'ease-out' });
+    if (e.status === 409) acceptData(await api('/api/data'));
+  } finally {
+    renameBusy = false;
+    if (renameModal.open && !renameModal.classList.contains('is-closing')) renameModal.querySelectorAll('button').forEach(b => { b.disabled = false; });
+  }
+}
+// 直した・まとめた結果を画面へ。まとめたときは「自分」・お気に入り・表示中の人も、まとめた先へ引き継ぐ。
+function applyPersonResult(r, fromId, before) {
+  if (r.unchanged) return;
+  const toId = r.merged?.to ?? fromId;
+  flipRender(() => {
+    if (toId !== fromId) {
+      if (meId === fromId) { meId = toId; try { localStorage.setItem('shift-me', toId); } catch {} }
+      favorites = new Set([...favorites].map(x => x === fromId ? toId : x)); saveFavorites();
+      if (self.id === fromId) { self = { id: toId }; try { localStorage.setItem('shift-focus', toId); } catch {} }
+    }
+    acceptData(r.data);
+  });
+  const row = peopleEl.querySelector(`.person[data-id="${CSS.escape(toId)}"]`);
+  if (row && !reduced()) {
+    row.querySelector('.pn b').animate([{ opacity: 0, transform: 'translateY(6px)' }, { opacity: 1, transform: 'none' }], { duration: 360, delay: 160, easing: EASE, fill: 'backwards' });
+    row.querySelector('.avatar').animate([{ boxShadow: '0 0 0 2px var(--paper),0 0 0 3.5px var(--accent)' }, { boxShadow: '0 0 0 2px var(--paper),0 0 0 12px transparent' }], { duration: 700, delay: 300, easing: 'ease-out' });
+  }
+  navigator.vibrate?.([10, 40, 16]);
+  const m = r.merged;
+  showToast({ text: m
+    ? `「${esc(before)}」さんを「${esc(m.name)}」さんにまとめました${m.months.length ? `<br><small>${m.months.map(k => `${parseKey(k)[1]}月`).join('・')}のシフトを移しました${m.conflicts ? `（重なった${m.conflicts}日は「${esc(m.name)}」さんの記号のまま）` : ''}</small>` : ''}`
+    : `名前を「${esc(r.renamed.name)}」に直しました<br><small>「${esc(before)}」で登録しても、同じ人に入ります</small>` });
+}
+$('.rename-yes').addEventListener('click', submitRename);
+$('.rename-no').addEventListener('click', closeRename);
+$('.rename-close').addEventListener('click', closeRename);
+renameInput.addEventListener('keydown', e => { if (e.key === 'Enter' && !e.isComposing) { e.preventDefault(); submitRename(); } });
+renameInput.addEventListener('input', () => { $('.rename-error').textContent = ''; });
+renameModal.addEventListener('cancel', e => { e.preventDefault(); closeRename(); });
+renameModal.addEventListener('keydown', e => { e.stopPropagation(); });
+
 async function savePending() {
   if (!job?.pending || job.saving || job.confirming) return;
   const { payload, plan } = job.pending, run = importRun;
@@ -1657,6 +1768,7 @@ function personStatus(p) {
 const GRIP = '<span class="grip" aria-hidden="true"><svg viewBox="0 0 24 24"><circle cx="9" cy="6" r="1.6"/><circle cx="15" cy="6" r="1.6"/><circle cx="9" cy="12" r="1.6"/><circle cx="15" cy="12" r="1.6"/><circle cx="9" cy="18" r="1.6"/><circle cx="15" cy="18" r="1.6"/></svg></span>';
 const PERSON = '<svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="8" r="3.6"/><path d="M5 20c.8-3.6 3.6-5.6 7-5.6s6.2 2 7 5.6"/></svg>';
 const ARROW = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12h14M13 6l6 6-6 6"/></svg>';
+const PENCIL = '<svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 20h4L18.5 9.5a2.8 2.8 0 0 0-4-4L4 16v4z"/><path d="m13.5 6.5 4 4"/></svg>';
 // 自分：この端末を使っている人。お気に入りや表示中の人が変わっても、変えない限り一番上に固定。
 let meId = null;
 try { meId = localStorage.getItem('shift-me'); } catch {}
@@ -1671,7 +1783,9 @@ function renderPeople() {
     const fav = favorites.has(p.id), isMe = section === 'me', inFav = section === 'fav';
     return `<li class="person${p === self ? ' current' : ''}${inFav ? ' is-fav' : ''}${isMe ? ' is-me' : ''}" data-id="${esc(p.id)}">`
       // 右へスワイプで現れる「自分」アクション。途中で止めればタップでも実行できる。
-      + `<div class="swipe-bg"><button type="button" class="sa sa-me" tabindex="-1" aria-label="${esc(p.name)}さんを${isMe ? '自分から外す' : '自分に設定'}"><span class="sa-ic">${PERSON}</span><span class="sa-lb">${isMe ? '自分を外す' : '自分'}</span></button></div>`
+      // 左へスワイプで現れる「名前」アクション（名前の間違いを直す・同じ人をまとめる）。
+      + `<div class="swipe-bg"><button type="button" class="sa sa-me" tabindex="-1" aria-label="${esc(p.name)}さんを${isMe ? '自分から外す' : '自分に設定'}"><span class="sa-ic">${PERSON}</span><span class="sa-lb">${isMe ? '自分を外す' : '自分'}</span></button>`
+      + `<button type="button" class="sa sa-name" tabindex="-1" aria-label="${esc(p.name)}さんの名前を直す"><span class="sa-ic">${PENCIL}</span><span class="sa-lb">名前</span></button></div>`
       + `<div class="row"><button type="button" class="pick" aria-pressed="${p === self}"><span class="avatar" aria-hidden="true">${esc([...p.name][0])}<span class="check">${CHECK}</span>${inFav ? `<i class="rank">${i + 1}</i>` : ''}</span>`
       + `<span class="pn"><b>${esc(p.name)}${isMe ? '<span class="me-tag">自分</span>' : ''}</b><small>${personStatus(p)}</small></span></button>`
       + `<button type="button" class="fav" aria-pressed="${fav}" aria-label="${esc(p.name)}さんをお気に入り${fav ? 'から外す' : 'に登録'}">${STAR}${inFav ? GRIP : ''}</button></div></li>`;
@@ -1835,6 +1949,7 @@ peopleEl.addEventListener('click', e => {
   if (!li) return;
   const p = people.find(x => x.id === li.dataset.id);
   // 開いたままのアクションボタンをタップ → 行を閉じてから実行。開いている行のほかの場所をタップ → 閉じるだけ。
+  if (e.target.closest('.sa-name') && li === openRow) { closeOpenRow(); openRename(li.dataset.id); return; }
   if (e.target.closest('.sa') && li === openRow) { runRowAction(li); return; }
   if (openRow) { closeOpenRow(); return; }
   if (e.target.closest('.fav')) toggleFavorite(p);
@@ -1954,7 +2069,7 @@ peopleEl.addEventListener('contextmenu', e => { if (e.target.closest('.person.is
 // ① 少し引いて離す → 元に戻る。
 // ② ボタン1つ分（約60px）まで引いて離す → 左に「自分」ボタンが出たまま止まり、タップで実行できる。
 // ③ 名前の丸アイコンの中心が、開始時刻の「00」付近に来たら離して実行。
-const SA_OPEN = 60, SA_OPEN_AT = 32;
+const SA_OPEN = 60, SA_OPEN_AT = 32, SA_NAME_FULL = 130;   // 左へ SA_NAME_FULL 以上で、名前を直す画面を一発で開く
 function rowActionThreshold(li) {
   const avatar = li.querySelector('.avatar').getBoundingClientRect();
   const time = li.querySelector('.pn small em');
@@ -1972,20 +2087,23 @@ function rowActionThreshold(li) {
 }
 let swipeRow = null, openRow = null;
 const rowOffset = li => li?._x ?? 0;
-// 行の位置に合わせて、ボタンの幅・丸の大きさ・ラベルの濃さを描く。
+// 行の位置に合わせて、ボタンの幅・丸の大きさ・ラベルの濃さを描く（右へ：自分、左へ：名前）。
 function paintRow(li, x) {
   li._x = x;
   li.querySelector('.row').style.transform = x ? `translateX(${x}px)` : '';
-  const k = Math.max(0, Math.min(1, x / SA_OPEN));
-  li.querySelector('.sa-me').style.width = `${Math.max(0, x)}px`;
-  li.querySelector('.sa-ic').style.transform = `scale(${.4 + .6 * k})`;
-  li.querySelector('.sa-lb').style.opacity = String(k);
+  for (const [b, w] of [[li.querySelector('.sa-me'), Math.max(0, x)], [li.querySelector('.sa-name'), Math.max(0, -x)]]) {
+    if (!b) continue;
+    const k = Math.min(1, w / SA_OPEN);
+    b.style.width = `${w}px`;
+    b.querySelector('.sa-ic').style.transform = `scale(${.4 + .6 * k})`;
+    b.querySelector('.sa-lb').style.opacity = String(k);
+  }
 }
 function settleRow(li, from, to, done) {
   if (reduced()) { paintRow(li, to); done?.(); return; }
-  const t0 = performance.now(), dur = to > from ? 340 : 300;
+  const opening = Math.abs(to) > Math.abs(from), t0 = performance.now(), dur = opening ? 340 : 300;
   // 開くときは少しだけ行き過ぎて戻る、閉じるときはすっと収まる。
-  const ease = to > from ? (k => 1 + 2.2 * (k - 1) ** 3 + 1.2 * (k - 1) ** 2) : (k => 1 - (1 - k) ** 3);
+  const ease = opening ? (k => 1 + 2.2 * (k - 1) ** 3 + 1.2 * (k - 1) ** 2) : (k => 1 - (1 - k) ** 3);
   const tick = t => {
     const k = Math.min(1, (t - t0) / dur);
     paintRow(li, from + (to - from) * ease(k));
@@ -2032,7 +2150,7 @@ function swipeToMe(li, x, v) {
 peopleEl.addEventListener('pointerdown', e => {
   if (e.button !== 0 || e.target.closest('.sa')) return;
   const li = e.target.closest('.person');
-  if (li) swipeRow = { li, id: li.dataset.id, pointerId: e.pointerId, x: e.clientX, y: e.clientY, origin: rowOffset(li), dx: rowOffset(li), locked: null, full: false, lastX: e.clientX, lastT: performance.now(), v: 0 };
+  if (li) swipeRow = { li, id: li.dataset.id, pointerId: e.pointerId, x: e.clientX, y: e.clientY, origin: rowOffset(li), dx: rowOffset(li), locked: null, full: null, lastX: e.clientX, lastT: performance.now(), v: 0 };
 });
 peopleEl.addEventListener('pointermove', e => {
   const s = swipeRow;
@@ -2041,8 +2159,8 @@ peopleEl.addEventListener('pointermove', e => {
   if (reorder?.lifted) { swipeRow = null; return; }
   const dx = e.clientX - s.x, dy = e.clientY - s.y;
   if (s.locked == null && Math.hypot(dx, dy) > 8) {
-    // 閉じている行は右へ、開いている行は左右どちらへも動かせる。
-    s.locked = Math.abs(dx) > Math.abs(dy) * 1.2 && (dx > 0 || s.origin > 0) ? 'x' : 'n';
+    // 右へ動かすと「自分」、左へ動かすと「名前」が現れる。
+    s.locked = Math.abs(dx) > Math.abs(dy) * 1.2 ? 'x' : 'n';
     if (s.locked === 'x') {
       cancelPress();
       if (openRow && openRow !== s.li) closeOpenRow();
@@ -2054,14 +2172,14 @@ peopleEl.addEventListener('pointermove', e => {
   if (s.locked !== 'x') return;
   const t = performance.now();
   s.v = (e.clientX - s.lastX) / Math.max(1, t - s.lastT); s.lastX = e.clientX; s.lastT = t;
-  const raw = s.origin + dx;
-  s.dx = raw < 0 ? raw * .1 : raw > s.width * .9 ? s.width * .9 + (raw - s.width * .9) * .2 : raw;
-  const full = raw >= s.FULL;
+  const raw = s.origin + dx, lim = s.width * .9;
+  s.dx = Math.abs(raw) > lim ? Math.sign(raw) * (lim + (Math.abs(raw) - lim) * .2) : raw;
+  const full = raw >= s.FULL ? 'me' : raw <= -SA_NAME_FULL ? 'name' : null;
   if (full !== s.full) {
     // 一発で実行できる位置に入った／出たとき：ボタンの伸び縮みをなめらかにし、振動で知らせる。
-    s.full = full; s.li.classList.toggle('full', full);
+    s.full = full; s.li.classList.toggle('full', full === 'me'); s.li.classList.toggle('full-l', full === 'name');
     navigator.vibrate?.(full ? 12 : 6);
-    if (full && !reduced()) s.li.querySelector('.sa-me .sa-ic').animate([{ scale: '1' }, { scale: '1.25' }, { scale: '1' }], { duration: 300, easing: EASE });
+    if (full && !reduced()) s.li.querySelector(`.sa-${full} .sa-ic`).animate([{ scale: '1' }, { scale: '1.25' }, { scale: '1' }], { duration: 300, easing: EASE });
   }
   paintRow(s.li, s.dx);
 });
@@ -2071,12 +2189,18 @@ function endRowSwipe(e, cancelled) {
   swipeRow = null;
   if (s.locked !== 'x') return;
   drawerSuppress = true; setTimeout(() => { drawerSuppress = false; }, 0);
-  s.li.classList.remove('swiping', 'full');
+  s.li.classList.remove('swiping', 'full', 'full-l');
   const v = performance.now() - s.lastT < 100 ? s.v : 0, x = s.dx;
-  if (!cancelled && s.full) { if (reduced()) runRowAction(s.li); else swipeToMe(s.li, x, v); return; }
-  // 右へ払う勢いがあれば開く、左へ払えば閉じる。どちらでもなければ位置で決める。
-  const open = !cancelled && (v > .5 ? x > 24 : v < -.5 ? false : x >= SA_OPEN_AT);
-  if (open) { openRowAt(s.li); settleRow(s.li, x, SA_OPEN); }
+  if (!cancelled && s.full === 'me') { if (reduced()) runRowAction(s.li); else swipeToMe(s.li, x, v); return; }
+  if (!cancelled && s.full === 'name') {
+    // 左へ払い切った：行を戻しながら、名前を直す画面を開く。
+    if (openRow === s.li) { openRow = null; s.li.classList.remove('opened'); }
+    settleRow(s.li, x, 0); openRename(s.id); return;
+  }
+  // 払う勢いがあればその向きのボタンを開く、逆へ払えば閉じる。どちらでもなければ位置で決める。
+  const openMe = !cancelled && (v > .5 ? x > 24 : v < -.5 ? false : x >= SA_OPEN_AT);
+  const openName = !cancelled && !openMe && (v < -.5 ? x < -24 : v > .5 ? false : x <= -SA_OPEN_AT);
+  if (openMe || openName) { openRowAt(s.li); settleRow(s.li, x, openMe ? SA_OPEN : -SA_OPEN); }
   else { if (openRow === s.li) { openRow = null; s.li.classList.remove('opened'); } settleRow(s.li, x, 0); }
 }
 window.addEventListener('pointerup', e => endRowSwipe(e, false));
@@ -2127,8 +2251,13 @@ document.addEventListener('keydown', e => {
 
 peopleEl.addEventListener('keydown', e => {
   const li = e.target.closest('.person');
-  if (li && e.key === 'ArrowRight') { e.preventDefault(); openRowAt(li); settleRow(li, 0, SA_OPEN); li.querySelector('.sa').tabIndex = 0; li.querySelector('.sa').focus(); }
-  else if (li && e.key === 'ArrowLeft') { e.preventDefault(); closeOpenRow(); li.querySelector('.pick').focus(); }
+  // →で「自分」、←で「名前」のボタンを開く。開いている側と逆の矢印なら閉じる。
+  const side = li && { ArrowRight: 1, ArrowLeft: -1 }[e.key];
+  if (side) {
+    e.preventDefault();
+    if (rowOffset(li) * side < 0) { closeOpenRow(); li.querySelector('.pick').focus(); }
+    else { openRowAt(li); settleRow(li, rowOffset(li), side * SA_OPEN); const b = li.querySelector(side > 0 ? '.sa-me' : '.sa-name'); b.tabIndex = 0; b.focus(); }
+  }
   if (li?.classList.contains('is-fav') && e.altKey && ['ArrowUp', 'ArrowDown'].includes(e.key)) {
     e.preventDefault(); const ids = [...favorites], i = ids.indexOf(li.dataset.id), j = i + (e.key === 'ArrowUp' ? -1 : 1);
     if (j >= 0 && j < ids.length) { [ids[i], ids[j]] = [ids[j], ids[i]]; flipRender(() => { favorites = new Set(ids); saveFavorites(); }); peopleEl.querySelector('[data-id="' + CSS.escape(li.dataset.id) + '"] .fav')?.focus(); }

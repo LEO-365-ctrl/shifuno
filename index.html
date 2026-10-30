@@ -321,6 +321,12 @@ svg.icon{width:17px;height:17px;fill:none;stroke:currentColor;stroke-width:1.8;s
 .sa-lb{font-size:10px;line-height:1.2;font-weight:600;color:var(--muted);white-space:nowrap}
 /* 一発で実行できる位置：「自分」が横いっぱいの帯に伸びる */
 .person.full .sa-me .sa-ic{width:calc(100% - 16px)}
+/* 左へスワイプで行の右に現れる「名前」アクション（名前を直す） */
+.sa-name{left:auto;right:0}
+.sa-name .sa-ic{background:var(--soft);color:var(--ink)}
+.person.full-l .sa-name .sa-ic{width:calc(100% - 16px)}
+/* メンバー一覧の上でも、名前を直した結果のお知らせが見えるように */
+.app.drawer-open .cell-toast{z-index:7}
 /* 自分 */
 .people .sec[data-sec="me"]{color:var(--accent)}
 .me-empty{list-style:none;display:flex;align-items:center;gap:10px;margin:0 2px 4px;padding:12px 14px;border-radius:14px;font-size:12px;color:var(--muted);
@@ -486,6 +492,13 @@ svg.icon{width:17px;height:17px;fill:none;stroke:currentColor;stroke-width:1.8;s
 @keyframes overwrite-shade-in{from{background:#21172d00;backdrop-filter:blur(0)}to{background:#21172d62;backdrop-filter:blur(5px)}}
 @keyframes overwrite-shade-out{to{background:#21172d00;backdrop-filter:blur(0)}}
 @media(prefers-reduced-motion:reduce){.overwrite-modal::backdrop{animation:none}.overwrite-modal button{transition:none}}
+/* 名前を直す：上書き確認と同じ画面に、入力欄とエラーの行だけ足す */
+.rename-input{display:block;width:100%;height:50px;margin:18px 0 12px;padding:0 14px;border:1px solid light-dark(#e3d8ee,#5d4b6c);border-radius:14px;background:light-dark(#fff,#3a3049);color:inherit;
+  font:inherit;font-size:17px;font-weight:600;text-align:center;outline:none;transition:border-color 160ms ease,box-shadow 160ms ease}
+.rename-input:focus{border-color:#67c8ff;box-shadow:0 0 0 3px #67c8ff40}
+.rename-input[hidden],.rename-months[hidden]{display:none}
+.rename-error{margin:10px 0 0;font-size:12px;line-height:1.6;color:light-dark(#c0425a,#ff9db0)}
+.rename-error:empty{display:none}
 
 /* ---- デスクトップではスマホ枠で表示 ---- */
 @media (min-width:600px){
@@ -621,7 +634,7 @@ svg.icon{width:17px;height:17px;fill:none;stroke:currentColor;stroke-width:1.8;s
   <div class="drawer-shade"></div>
   <aside class="drawer" role="dialog" aria-modal="true" aria-labelledby="drawer-title" aria-hidden="true">
     <div class="drawer-head">
-      <div><h2 id="drawer-title">メンバー</h2><p class="drawer-note">タップで切り替え · 右へスワイプで「自分」に設定</p></div>
+      <div><h2 id="drawer-title">メンバー</h2><p class="drawer-note">タップで切り替え · 右へスワイプで「自分」に設定 · 左へスワイプで名前を直す</p></div>
       <button type="button" class="iconbtn drawer-close" aria-label="メンバー一覧を閉じる"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M18 6 6 18M6 6l12 12"/></svg></button>
     </div>
     <ul class="people" role="list"></ul>
@@ -657,6 +670,20 @@ svg.icon{width:17px;height:17px;fill:none;stroke:currentColor;stroke-width:1.8;s
     <div class="overwrite-buttons">
       <button type="button" class="overwrite-no" autofocus>上書きしない</button>
       <button type="button" class="overwrite-yes">上書きする</button>
+    </div>
+  </dialog>
+  <!-- 名前を直す（メンバー一覧で左へスワイプ）。見た目は上書き確認と同じ -->
+  <dialog class="overwrite-modal rename-modal" aria-labelledby="rename-title" aria-describedby="rename-description">
+    <button type="button" class="overwrite-close rename-close" aria-label="名前の修正を閉じる"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="m6 6 12 12M18 6 6 18"/></svg></button>
+    <div class="overwrite-emblem rename-emblem" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M4 20h4L18.5 9.5a2.8 2.8 0 0 0-4-4L4 16v4z"/><path d="m13.5 6.5 4 4"/></svg></div>
+    <h2 id="rename-title" class="rename-title">名前を直す</h2>
+    <input class="rename-input" type="text" maxlength="40" autocomplete="off" autocapitalize="off" spellcheck="false" enterkeyhint="done" aria-label="新しい名前">
+    <div class="overwrite-months rename-months" hidden></div>
+    <p id="rename-description" class="overwrite-description rename-description"></p>
+    <p class="rename-error" role="alert"></p>
+    <div class="overwrite-buttons">
+      <button type="button" class="overwrite-no rename-no">やめる</button>
+      <button type="button" class="overwrite-yes rename-yes">直す</button>
     </div>
   </dialog>
 
