@@ -104,7 +104,8 @@ svg.icon{width:17px;height:17px;fill:none;stroke:currentColor;stroke-width:1.8;s
 .day.holiday .date{color:light-dark(#b96f74,#f0b0b4)}
 .day.holiday.today .date{background:light-dark(#f8e5e5,#532c35)}
 .day.today::after{content:'';position:absolute;inset:-1px;border-radius:14px;box-shadow:0 0 0 0 var(--accent);opacity:.5;animation:today-ring 2.4s var(--ease-out) .9s 2;pointer-events:none}
-@keyframes today-ring{from{box-shadow:0 0 0 0 var(--accent);opacity:.55}to{box-shadow:0 0 0 7px var(--accent);opacity:0}}
+/* 輪は透明から始めてふわっと濃くし、広がりながら消える（2回目の始まりで濃さが跳ねて光らないように） */
+@keyframes today-ring{0%{box-shadow:0 0 0 0 var(--accent);opacity:0}16%{opacity:.55}to{box-shadow:0 0 0 7px var(--accent);opacity:0}}
 .day.selected:not(.today){box-shadow:inset 0 0 0 1.5px var(--line)}
 .empty{min-width:0}
 /* 下部：今日のシフト */
