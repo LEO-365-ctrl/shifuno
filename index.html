@@ -120,12 +120,17 @@ svg.icon{width:17px;height:17px;fill:none;stroke:currentColor;stroke-width:1.8;s
 .tc-go{grid-column:2;grid-row:1 / span 2;display:flex;align-items:center;gap:2px;font-size:12px;color:var(--accent);white-space:nowrap}
 .tc-go[hidden]{display:none}
 /* 時計の帯：iPhone のホーム画面アプリは画面の上端にぼかしをかけるが、上端に色付きの固定要素があると
-   ぼかさずにその色で時計の部分を塗る（その下のページは見えない）。そこで、いま一番上に見えている画面の色に合わせる。
-   ふだんはカレンダーの色、勤務表を開くと shade を重ねた色、メンバー一覧・登録画面はその画面の色（上端まで伸びて見える）。
-   時計の帯がない画面（Android・Safari のタブ・デスクトップ）では高さ 0 で何もしない。 */
-.status-cover{position:fixed;top:0;left:0;right:0;height:env(safe-area-inset-top,0px);background:var(--paper);z-index:11;pointer-events:none;transition:background-color 300ms ease}
-.app.open .status-cover{background:light-dark(#d4cbce,#171313)}
-.app.drawer-open .status-cover,.app:has(.importer:not([hidden])) .status-cover{background:light-dark(#fcfaff,#27232f)}
+   ぼかさずにその色で時計の部分を不透明に塗り、ページはその下から始まる（安全領域が 0 になる）。
+   そのため高さは最低 6px を保つ（0 になると見つけてもらえず、ぼかしに戻る）。背景と同じ色なので見た目は変わらない。 */
+.status-cover{position:fixed;top:0;left:0;right:0;height:max(6px,env(safe-area-inset-top));background:var(--paper);z-index:1;pointer-events:none}
+/* iPhone のホーム画面アプリだけ：時計の部分の色を、いま一番上に見えている画面の色に合わせる。
+   勤務表を開くと shade を重ねた色、メンバー一覧・登録画面はその画面の色（上端までつながって見える）。
+   帯（6px）は一番上に出して、時計の部分と同じ色の帯としてつなげる。 */
+@supports (-webkit-touch-callout:none){@media (display-mode:standalone){
+  .status-cover{z-index:11}
+  .app.open .status-cover{background:light-dark(#d4cbce,#171313)}
+  .app.drawer-open .status-cover,.app:has(.importer:not([hidden])) .status-cover{background:light-dark(#fcfaff,#27232f)}
+}}
 
 /* ---- 勤務表（ボトムシート）：紫・ラベンダー ---- */
 .shade{position:absolute;inset:0;background:light-dark(#3a243a38,#0000007a);z-index:2;opacity:0;visibility:hidden;transition:opacity 280ms ease,visibility 0s linear 280ms}
