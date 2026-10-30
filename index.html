@@ -22,7 +22,8 @@
 :root[data-theme="dark"]{color-scheme:dark}
 :root[data-theme="light"]{color-scheme:light}
 *{box-sizing:border-box}
-html,body{height:100%;margin:0}
+/* 画面全体を引っぱっても弾ませない（iPhone で時計の帯の下へ潜り込み、ぼかしがかかるのを防ぐ） */
+html,body{height:100%;margin:0;overscroll-behavior:none}
 /* スマホではアプリと同じ色（iPhone のホーム画面アプリは、時計の帯をこの色で塗る）。デスクトップの外側の色は下のメディアクエリ */
 body{background:light-dark(#fffaf8,#2c2525);font-family:-apple-system,BlinkMacSystemFont,'Hiragino Sans','Segoe UI','Noto Sans JP',sans-serif;-webkit-text-size-adjust:100%}
 button{font:inherit;color:inherit;-webkit-tap-highlight-color:transparent}
@@ -41,7 +42,8 @@ svg.icon{width:17px;height:17px;fill:none;stroke:currentColor;stroke-width:1.8;s
   font-size:14px;line-height:1.5;
 }
 .calendar-view{
-  position:absolute;inset:0;display:flex;flex-direction:column;overflow-y:auto;overscroll-behavior:contain;
+  /* 1画面に収まる機種では動かない（弾みもしない）。収まらない小さい画面（iPhone SE など）だけ縦に送れる */
+  position:absolute;inset:0;display:flex;flex-direction:column;overflow-y:auto;overscroll-behavior:none;
   padding:env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left);
   transform-origin:50% 24%;transition:transform 480ms var(--ease-out);will-change:transform;
 }
