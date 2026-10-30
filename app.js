@@ -1732,9 +1732,13 @@ function toggleFavorite(p) {
   else star.animate([{ transform: 'scale(.75)' }, { transform: 'none' }], { duration: 260, easing: EASE });
 }
 // 自分を登録（または外す）。新しい自分の行は右から入って一番上に収まり、輪が広がって知らせる。
-function setMe(id) {
+// leaving：右へ払い切って抜けた行（swipeToMe）。そのときは跡の帯を詰めながら閉じ、自分の欄へ右の外から入れる。
+function setMe(id, leaving = null) {
   // 新しい端末では、仮の「自分」が本人の欄にいる。本人を選んだら、その人を本人にして仮の人を外す（データだけ。見た目はそのまま）。
   if (id && id !== 'me' && DATA.self === 'me') setTimeout(() => LocalShift.adoptSelf(id).then(next => { if (next) acceptData(next); }).catch(() => {}), reduced() ? 0 : 900);
+  const gap = leaving && !reduced() ? gapOf(leaving) : null;
+  const hint = gap && peopleEl.querySelector('.me-empty');
+  const hintBox = hint && { top: hint.offsetTop, left: hint.offsetLeft, w: hint.offsetWidth, el: hint.cloneNode(true) };
   flipRender(() => {
     meId = id;
     try { if (id) localStorage.setItem('shift-me', id); else localStorage.removeItem('shift-me'); } catch {}
@@ -1743,13 +1747,52 @@ function setMe(id) {
   if (reduced() || !id) return;
   const row = peopleEl.querySelector('.person.is-me');
   row.getAnimations().forEach(a => a.cancel());
-  row.animate([{ opacity: 0, transform: 'translateX(60px) scale(.96)' }, { opacity: 1, transform: 'translateX(-4px) scale(1.02)', offset: .65 }, { opacity: 1, transform: 'none' }],
-    { duration: 520, easing: EASE });
+  const swiped = !!gap, enter = swiped ? 90 : 0;
+  if (swiped) {
+    closeGap(gap);
+    // 空だった自分の欄の案内は、入ってくる行と入れ違いに左へ抜けて消える。
+    if (hintBox) {
+      hintBox.el.setAttribute('aria-hidden', 'true');
+      hintBox.el.style.cssText = `position:absolute;left:${hintBox.left}px;top:${hintBox.top}px;width:${hintBox.w}px;margin:0;pointer-events:none`;
+      peopleEl.append(hintBox.el);
+      hintBox.el.animate([{ opacity: 1, transform: 'none' }, { opacity: 0, transform: 'translateX(-22px)' }], { duration: 260, easing: 'cubic-bezier(.4,0,1,1)', fill: 'forwards' })
+        .finished.then(() => hintBox.el.remove(), () => hintBox.el.remove());
+    }
+    // 画面の右の外から滑り込み、少し行き過ぎて戻って収まる。
+    row.animate([{ transform: `translateX(${row.offsetWidth + 24}px)` }, { transform: 'translateX(-10px)', offset: .6 }, { transform: 'translateX(3px)', offset: .82 }, { transform: 'none' }],
+      { duration: 640, delay: enter, easing: 'cubic-bezier(.2,.7,.3,1)', fill: 'backwards' });
+  } else {
+    row.animate([{ opacity: 0, transform: 'translateX(60px) scale(.96)' }, { opacity: 1, transform: 'translateX(-4px) scale(1.02)', offset: .65 }, { opacity: 1, transform: 'none' }],
+      { duration: 520, easing: EASE });
+  }
   row.querySelector('.avatar').animate([{ boxShadow: '0 0 0 2px var(--paper),0 0 0 3.5px var(--accent)' }, { boxShadow: '0 0 0 2px var(--paper),0 0 0 12px transparent' }],
-    { duration: 700, delay: 380, easing: 'ease-out' });
+    { duration: 700, delay: swiped ? enter + 440 : 380, easing: 'ease-out' });
   row.querySelector('.me-tag').animate([{ transform: 'scale(0)' }, { transform: 'scale(1.25)', offset: .6 }, { transform: 'none' }],
-    { duration: 420, delay: 300, easing: EASE, fill: 'backwards' });
-  peopleEl.querySelector('.sec[data-sec="me"]').animate([{ transform: 'scale(1)' }, { transform: 'scale(1.12)', offset: .4 }, { transform: 'none' }], { duration: 420, easing: EASE });
+    { duration: 420, delay: swiped ? enter + 380 : 300, easing: EASE, fill: 'backwards' });
+  peopleEl.querySelector('.sec[data-sec="me"]').animate([{ transform: 'scale(1)' }, { transform: 'scale(1.12)', offset: .4 }, { transform: 'none' }], { duration: 420, delay: swiped ? enter + 300 : 0, easing: EASE });
+}
+// 抜けた行の位置と、前後の行・後ろに広がった「自分」の帯を控える（描き直す前に呼ぶ）。
+const rowKey = li => li ? li.dataset.id ?? li.dataset.sec ?? li.className : null;
+function gapOf(li) {
+  const prev = li.previousElementSibling, next = li.nextElementSibling;
+  return { top: li.offsetTop, left: li.offsetLeft, w: li.offsetWidth, h: li.offsetHeight, bg: li.querySelector('.swipe-bg').cloneNode(true),
+    prev: rowKey(prev), prevGap: prev ? li.offsetTop - (prev.offsetTop + prev.offsetHeight) : 0,
+    next: rowKey(next), nextGap: next ? next.offsetTop - (li.offsetTop + li.offsetHeight) : 0 };
+}
+// 跡の帯：上の端は前の行の下に、下の端は次の行の上について行き、詰まりきると消える（flipRender と同じ速さ・同じ緩急）。
+function closeGap(gap) {
+  const find = k => k && [...peopleEl.children].find(el => rowKey(el) === k);
+  const next = find(gap.next), prev = find(gap.prev);
+  const end = next ? next.offsetTop - gap.nextGap : prev ? prev.offsetTop + prev.offsetHeight + gap.prevGap : gap.top;
+  const ghost = document.createElement('li');
+  ghost.setAttribute('aria-hidden', 'true');
+  ghost.style.cssText = `position:absolute;left:${gap.left}px;top:${gap.top}px;width:${gap.w}px;height:${gap.h}px;list-style:none;border-radius:14px;overflow:hidden;pointer-events:none;z-index:2`;
+  const sa = gap.bg.querySelector('.sa-me');
+  sa.style.width = '100%'; gap.bg.querySelector('.sa-ic').style.width = 'calc(100% - 16px)';
+  ghost.append(gap.bg); peopleEl.append(ghost);
+  ghost.animate([{ transform: 'none', clipPath: 'inset(0 0 0 0 round 14px)' }, { transform: `translateY(${end - gap.top}px)`, clipPath: `inset(0 0 ${gap.h}px 0 round 14px)` }],
+    { duration: 460, easing: EASE, fill: 'forwards' }).finished.then(() => ghost.remove(), () => ghost.remove());
+  sa.animate([{ opacity: 1 }, { opacity: 0 }], { duration: 460, easing: 'cubic-bezier(.5,0,.9,.6)', fill: 'forwards' });
 }
 // 名前をタップ：チェックを移し、少し見せてから閉じて、カレンダーをその人のシフトに入れ替える。
 function choosePerson(p) {
@@ -1953,6 +1996,22 @@ function runRowAction(li) {
   openRow = null; li.classList.remove('opened');
   settleRow(li, rowOffset(li), 0, go);
 }
+// 右へ払い切って「自分」に設定：行は戻らずに離した勢いのまま右へ抜け、後ろの「自分」の帯が行いっぱいに広がる。
+// 抜けきったら setMe へ渡し、空いた所を詰めて、自分の欄へ右の外から入ってくる。
+function swipeToMe(li, x, v) {
+  openRow = null; li.classList.remove('opened'); li.classList.add('full');
+  const to = li.offsetWidth + 24, dist = Math.max(1, to - x);
+  // 出だしの速さを指の速さに合わせ、だんだん緩める（速く払うほど早く抜ける）。
+  const dur = Math.max(180, Math.min(320, 1.6 * dist / Math.max(.8, v)));
+  const ease = k => 1 - (1 - k) ** 1.6, t0 = performance.now();
+  li.querySelector('.sa-ic').animate([{ scale: '1' }, { scale: '1.18' }, { scale: '1' }], { duration: 360, easing: EASE });
+  const tick = t => {
+    const k = Math.min(1, (t - t0) / dur);
+    paintRow(li, x + dist * ease(k));
+    if (k < 1 && li.isConnected) requestAnimationFrame(tick); else if (li.isConnected) setMe(li.dataset.id, li);
+  };
+  requestAnimationFrame(tick);
+}
 peopleEl.addEventListener('pointerdown', e => {
   if (e.button !== 0 || e.target.closest('.sa')) return;
   const li = e.target.closest('.person');
@@ -1997,7 +2056,7 @@ function endRowSwipe(e, cancelled) {
   drawerSuppress = true; setTimeout(() => { drawerSuppress = false; }, 0);
   s.li.classList.remove('swiping', 'full');
   const v = performance.now() - s.lastT < 100 ? s.v : 0, x = s.dx;
-  if (!cancelled && s.full) { runRowAction(s.li); return; }
+  if (!cancelled && s.full) { if (s.id === meId || reduced()) runRowAction(s.li); else swipeToMe(s.li, x, v); return; }
   // 右へ払う勢いがあれば開く、左へ払えば閉じる。どちらでもなければ位置で決める。
   const open = !cancelled && (v > .5 ? x > 24 : v < -.5 ? false : x >= SA_OPEN_AT);
   if (open) { openRowAt(s.li); settleRow(s.li, x, SA_OPEN); }
