@@ -55,6 +55,13 @@ function analyze(img) {
     vScore[x] = c / bandYs.length;
   }
   const vLines = peaks(vScore, 2, W - 2, .5);
+  // 左端ぎりぎりで切り取った画像（LINE で届いた画像など）は、表の一番左の罫線が写っていない。
+  // 一番左の縦線より左に文字（明るい地に暗い点）があれば、画像の左端を線とみなして、日付の列を取りこぼさない。
+  if (vLines.length && vLines[0] >= 12) {
+    let dark = 0, n = 0;
+    for (const [y0, y1] of rows) for (let y = y0 + 3; y < y1 - 2; y += 2) for (let x = 1; x < vLines[0] - 2; x += 2) { n++; dark += L[y * W + x] < 110; }
+    if (n && dark / n > .01 && dark / n < .5) vLines.unshift(0);
+  }
   const cols = spans(vLines, 10);
   if (rows.length < 30 || cols.length < 3) throw Object.assign(readError('罫線（マス目）を見つけられませんでした。'), { debug: { top, bottom, h: hLines.length, v: vLines.length, rows: rows.length, cols: cols.length, hMax: Math.max(...hScore), vMax: Math.max(...vScore) } });
   return { img, L, W, H, rows, cols, right: vLines[vLines.length - 1] };
@@ -103,6 +110,9 @@ function inkMap(g, rect, bg) {
   // 端に残った太い罫線（横幅・縦幅の大半を覆う濃い帯）は文字ではないので消す。
   for (const y of [0, 1, 2, h - 3, h - 2, h - 1]) { if (y < 0 || y >= h) continue; let k = 0; for (let x = 0; x < w; x++) k += m[y * w + x] > .5; if (k > w * .6) for (let x = 0; x < w; x++) m[y * w + x] = 0; }
   for (const x of [0, 1, 2, w - 3, w - 2, w - 1]) { if (x < 0 || x >= w) continue; let k = 0; for (let y = 0; y < h; y++) k += m[y * w + x] > .5; if (k > h * .6) for (let y = 0; y < h; y++) m[y * w + x] = 0; }
+  // 太い罫線のすぐ隣（見出しの下の1日の行など）に残る、薄いにじみの線も消す。濃さは薄くても横いっぱいに続くので文字ではない。
+  // 残すと、端の数点が文字の外接枠を広げて形が崩れ、記号を読めなくなる。
+  for (const y of [0, 1, 2, h - 3, h - 2, h - 1]) { if (y < 0 || y >= h) continue; let k = 0; for (let x = 0; x < w; x++) k += m[y * w + x] > .2; if (k > w * .45) for (let x = 0; x < w; x++) m[y * w + x] = 0; }
   const [r, gg, b] = n ? sum.map(s => s / n) : [0, 0, 0];
   const color = !n ? 'none' : lumOf(r, gg, b) > 185 ? 'white' : r > 140 && r - gg > 60 ? 'red' : 'dark';
   return { m, w, h, color, n };

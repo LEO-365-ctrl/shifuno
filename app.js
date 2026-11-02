@@ -1225,6 +1225,25 @@ async function cropCells(imageData, read, hints) {
   }
   return crops;
 }
+// 同じ形のマス：未確認のマスに記号を入れたとき、同じ文字色で形がよく似た（相関 .8 以上）ほかの未確認のマスを返す。
+// LINE で届いた画像は圧縮でにじみ、同じ記号でも相関が .82〜.90 にばらつく。違う記号どうしは .75 未満だった（9月の画像で確認）。
+// 背景色は問わない（平日は黄色・土日は薄い色、のように同じ記号でも行によって地の色が違うため。形は地の色を除いて比べている）。
+// 休職のように同じ見慣れない記号が何十マスも並ぶとき、1マス選べば残りもまとめて入るようにする（読めたマスは変えない）。
+// 似たマスに似たマスもたどる（にじみ方の違いで、選んだマスから直接は少し遠いマスも拾う）。どの日から選んでも同じ結果になる。
+function similarCells(read) {
+  const corr = window.ShiftReader._internal.corr, decode = window.ShiftReader.decode;
+  const cells = read.columns.flatMap((col, k) => col.cells.map((c, i) => !c.code && c.sample ? { k, day: i + 1, color: c.sample.color, v: decode(c.sample.v) } : null)).filter(Boolean);
+  return (k, day) => {
+    const start = cells.find(c => c.k === k && c.day === day); if (!start) return [];
+    const group = new Set([start]), queue = [start];
+    while (queue.length) {
+      const a = queue.shift();
+      for (const b of cells) if (!group.has(b) && b.color === a.color && corr(a.v, b.v) >= .8) { group.add(b); queue.push(b); }
+    }
+    group.delete(start);
+    return [...group].map(c => [c.k, c.day]);
+  };
+}
 async function saveImageDraft(item, draft) {
   const saved = await api(`/api/image-draft?id=${item.id}`);
   return api('/api/image-draft', { id: item.id, draft, version: saved.version });
@@ -1831,7 +1850,9 @@ async function openImageEditor(item) {
     const saved = await api(`/api/image-draft?id=${item.id}`);
     if (run !== importRun) return;
     if (saved.status === 'complete') { await openHistory(); return; }
-    job.entry = new window.ImageEntry($('.imp-editor'), item, saved, DATA.codes, api, () => openImageEditor(item), readCache.get(item.id)?.hints);
+    const cached = readCache.get(item.id);
+    if (cached?.hints && cached.read) cached.hints.similar = similarCells(cached.read);
+    job.entry = new window.ImageEntry($('.imp-editor'), item, saved, DATA.codes, api, () => openImageEditor(item), cached?.hints);
     showImageEditor();
     // 開く動きが落ち着いてから、確認が必要な最初の日へ寄せる。
     setTimeout(() => job?.entry?.focusNeed(reduced()), reduced() ? 0 : 520);

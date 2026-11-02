@@ -7,7 +7,7 @@ window.ImageEntry = class {
   constructor(root, item, saved, codes, api, reopen, hints = null) {
     const need = hints ? Object.fromEntries(Object.entries(hints.cells ?? {}).map(([n, days]) => [n, new Set(days.map(String))])) : {};
     const flagged = saved.draft.names.find(n => need[n]?.size || hints?.people?.[n]);
-    Object.assign(this, { root, item, codes, api, version: saved.version, draft: saved.draft, selected: flagged ?? saved.draft.names[0] ?? '', queue: Promise.resolve(), dirty: false, error: null, need, why: { ...(hints?.people ?? {}) }, crops: { ...(hints?.crops ?? {}) } });
+    Object.assign(this, { root, item, codes, api, version: saved.version, draft: saved.draft, selected: flagged ?? saved.draft.names[0] ?? '', queue: Promise.resolve(), dirty: false, error: null, need, why: { ...(hints?.people ?? {}) }, crops: { ...(hints?.crops ?? {}) }, similar: hints?.similar ?? null });
     root.innerHTML = `${hints ? '<div class="entry-hints" role="status"></div>' : ''}<div class="entry-source"><img src="${LocalShift.imageSrc(item.id)}" alt="登録する元のシフト表"><button type="button" class="entry-zoom">画像を拡大</button></div>
       <p class="entry-help">${hints ? '読み取れた所は入力済みです。色の付いた所だけ、画像を見て直してください。' : '画像を見ながら年月・氏名・記号を入力してください。読めない欄は「未確認」のまま残せます。'}</p>
       <label>画像の年月<input class="entry-month" type="month" min="2000-01" max="2100-12" value="${esc(this.draft.month)}"></label>
@@ -42,7 +42,10 @@ window.ImageEntry = class {
       if (!Object.hasOwn(this.draft.cells, this.selected)) Object.defineProperty(this.draft.cells, this.selected, { value: {}, enumerable: true, writable: true });
       this.draft.cells[this.selected][e.target.dataset.day] = e.target.value;
       // 直したマスは確認済みにして、色をそっと消す。
-      if (e.target.value && this.need[this.selected]?.delete(e.target.dataset.day)) { e.target.closest('label').classList.remove('need'); this.renderPeople(false); }
+      const wasNeed = e.target.value && this.need[this.selected]?.delete(e.target.dataset.day);
+      if (wasNeed) { e.target.closest('label').classList.remove('need'); this.renderPeople(false); }
+      // 同じ形のほかの未確認のマス（休職が何十日も並ぶときなど）にも、同じ記号をまとめて入れる。
+      if (wasNeed) this.fillSimilar(this.draft.names.indexOf(this.selected), Number(e.target.dataset.day), e.target.value);
       this.changed(); this.count();
     });
     root.querySelector('.entry-zoom').addEventListener('click', () => {
@@ -82,6 +85,20 @@ window.ImageEntry = class {
       return `<label${need ? ` class="need${crop ? ' has-crop' : ''}"` : ''}><span>${day}日</span>${crop ? `<img class="need-crop" src="${esc(crop)}" alt="画像のこのマス">` : ''}<select data-day="${day}" aria-label="${esc(name)} ${day}日の勤務"><option value="">未確認</option>${choices.map(([c,l]) => `<option value="${esc(c)}"${value===c?' selected':''}>${esc(l)}</option>`).join('')}</select>${need ? `<button type="button" class="entry-add" data-day="${day}" aria-label="${day}日に入れる記号を新しく追加"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg></button>` : ''}</label>`;
     }).join('') : '<p>年月と氏名を入力すると、日別の入力欄が表示されます。</p>';
     this.count(); this.renderHints();
+  }
+  fillSimilar(k, day, code) {
+    if (!this.similar || k < 0) return;
+    let n = 0;
+    for (const [k2, d2] of this.similar(k, day)) {
+      const name = this.draft.names[k2], d = String(d2);
+      if (!name || !this.need[name]?.has(d) || (this.draft.cells[name]?.[d] ?? '')) continue;   // 未確認のまま残っているマスだけ
+      if (!Object.hasOwn(this.draft.cells, name)) Object.defineProperty(this.draft.cells, name, { value: {}, enumerable: true, writable: true });
+      this.draft.cells[name][d] = code; this.need[name].delete(d); n++;
+    }
+    if (!n) return;
+    this.renderPeople(); this.status(`同じ形の${n}マスにも「${code}」を入れました（違う所があれば直してください）`);
+    // まとめて入ったマス（いま表示中の人の分）を、そっと光らせて知らせる。
+    if (!matchMedia('(prefers-reduced-motion: reduce)').matches) for (const [k2, d2] of this.similar(k, day)) if (this.draft.names[k2] === this.selected) this.root.querySelector(`.entry-days select[data-day="${d2}"]`)?.animate([{ boxShadow: '0 0 0 3px #67c8ff80' }, { boxShadow: '0 0 0 0 #67c8ff00' }], { duration: 1100, delay: 120, easing: 'ease-out' });
   }
   // 記号が増えたとき（「＋」や設定から追加）：一覧を新しくし、pick があればその日にその記号を入れる（選んだときと同じ流れ）。
   setCodes(codes, pick) {
