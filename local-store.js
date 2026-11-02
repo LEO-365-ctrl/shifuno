@@ -81,7 +81,10 @@ function prepare(data, files) {
         if (row.length !== head.length) { issues.push(`${file.name} ${i + 1}行目：氏名と勤務記号の列数が一致しません。`); continue; }
         const key = `${match[1]}-${String(+match[2]).padStart(2, '0')}`, d = +match[3]; months.add(key);
         ids.forEach((id, j) => {
-          let code = normal(row[j + 1]); if (!Object.hasOwn(data.codes, code)) code = code.toUpperCase();
+          let code = normal(row[j + 1]);
+          // 共有で受け取った勤務表（skip）では、送った側でも未登録・未確認だった日（? や空欄）は書き込まずに飛ばす。
+          if (file.skip === true && (code === '' || code === '?')) return;
+          if (!Object.hasOwn(data.codes, code)) code = code.toUpperCase();
           if (!Object.hasOwn(data.codes, code)) { issues.push(`${file.name} ${key}-${String(d).padStart(2, '0')} ${labels[j]}：${code ? `未定義の記号「${code}」` : '空欄'}。記号を確認してください。`); return; }
           const k = `${key}/${d}/${id}`, previous = writes.get(k);
           if (previous && previous.code !== code) { issues.push(`${key}-${d} ${labels[j]}：同じ日・人物に異なる記号があります。`); return; }
@@ -272,6 +275,7 @@ function createLocal(adapter, { seed, now = () => Date.now() } = {}) {
         if (p === '/api/commit') return local.commit(body);
         if (p === '/api/image-draft') return local.saveDraft(body);
         if (p === '/api/person') return local.renamePerson(body);
+        if (p === '/api/code') return body?.remove ? local.removeCode(body) : local.addCode(body);
         if (p === '/api/reader-learn') { const next = structuredClone(data); next.reader = learnReader(data.reader, body, data.codes, data.people); await save(next); return { data: structuredClone(data) }; }
         if (p === '/api/images') return local.receiveImages(body.files);
       }
@@ -326,6 +330,38 @@ function createLocal(adapter, { seed, now = () => Date.now() } = {}) {
       if (next.reader?.names?.[id]) { next.reader.names[tgt.id] ??= next.reader.names[id]; delete next.reader.names[id]; }
       if (Array.isArray(next.reader?.order)) { const has = next.reader.order.includes(tgt.id); next.reader.order = next.reader.order.map(x => x === id ? (has ? null : tgt.id) : x); }
       await save(next); return { data: structuredClone(data), merged: { from: id, to: tgt.id, name: tgt.name, months, conflicts } };
+    },
+    // 勤務の記号を手で足す（設定・手入力の登録画面の「＋」・共有で受け取った記号）。足した記号には custom の印を付ける。
+    // 勤務は時間が必要。お休み・その他は時間なし（カレンダーには記号の言葉をそのまま出す）。
+    // 足す・消すはいまの保存内容に対して1回で行うので、画面の版（revision）とは照らし合わせない
+    // （登録画面の下書きの自動保存で版が進んでいても、そのまま足せるように）。
+    async addCode({ code, kind, start, end }) {
+      code = typeof code === 'string' ? normal(code) : '';
+      if (!code || [...code].length > 8 || /[<>"'`,?\x00-\x1f]/.test(code)) fail('記号は1〜8文字で入力してください（< > " \' , ? は使えません）。');
+      if (Object.keys(data.codes).some(k => normal(k) === code || k.toUpperCase() === code.toUpperCase())) fail(`「${code}」はすでにあります。`);
+      if (!['work', 'off', 'other'].includes(kind)) fail('種類を選んでください。');
+      const def = { kind, custom: true };
+      if (kind === 'work') {
+        const t = s => { const m = typeof s === 'string' && s.match(/^(\d{1,2}):([0-5]\d)$/); return m && +m[1] <= 24 && (+m[1] < 24 || m[2] === '00') ? `${+m[1]}:${m[2]}` : null; };
+        const s = t(start), e = t(end), h = x => { const [a, b] = x.split(':').map(Number); return a + b / 60; };
+        if (!s || !e) fail('勤務の時間（始まりと終わり）を入れてください。');
+        if (h(e) <= h(s)) fail('終わりの時間は、始まりより後にしてください。');
+        Object.assign(def, { start: s, end: e });
+      }
+      if (Object.values(data.codes).filter(c => c.custom).length >= 40) fail('追加できる記号は40個までです。');
+      const next = structuredClone(data);
+      next.codes[code] = def;
+      await save(next); return { data: structuredClone(data), code };
+    },
+    // 足した記号を消す。使っている月があるときは消さない（シフトが「未確認」になってしまうため）。読み取りの見本も一緒に消す。
+    async removeCode({ code }) {
+      if (!data.codes[code]?.custom) fail('はじめからある記号は消せません。');
+      const used = Object.keys(data.months).filter(k => Object.values(data.months[k].shifts).some(s => s.split(/\s+/).includes(code))).sort();
+      if (used.length) fail(`「${code}」は${used.map(k => `${+k.slice(5)}月`).join('・')}のシフトで使っているので消せません。`);
+      const next = structuredClone(data);
+      delete next.codes[code];
+      if (next.reader?.codes) for (const k of Object.keys(next.reader.codes)) if (k.startsWith(`${code}#`)) delete next.reader.codes[k];
+      await save(next); return { data: structuredClone(data) };
     },
     async editCell({ key, day, id, code, revision }) {
       if (revision !== data.revision) fail('別の画面から更新されています。最新の内容を読み込みました。', 409);

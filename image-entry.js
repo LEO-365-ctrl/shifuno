@@ -78,9 +78,20 @@ window.ImageEntry = class {
     this.root.querySelector('.entry-days').innerHTML = days && name ? Array.from({length:days}, (_,i) => {
       const day = i+1, value = Object.hasOwn(this.draft.cells, name) ? this.draft.cells[name][day] ?? '' : '';
       const need = this.need[name]?.has(String(day)), crop = need && this.crops[name]?.[day];
-      return `<label${need ? ` class="need${crop ? ' has-crop' : ''}"` : ''}><span>${day}日</span>${crop ? `<img class="need-crop" src="${esc(crop)}" alt="画像のこのマス">` : ''}<select data-day="${day}" aria-label="${esc(name)} ${day}日の勤務"><option value="">未確認</option>${choices.map(([c,l]) => `<option value="${esc(c)}"${value===c?' selected':''}>${esc(l)}</option>`).join('')}</select></label>`;
+      // 確認が必要な日は、プルダウンの横に「＋」：一覧に無い記号を足して、そのままこの日に入れる（app.js が受け持つ）。
+      return `<label${need ? ` class="need${crop ? ' has-crop' : ''}"` : ''}><span>${day}日</span>${crop ? `<img class="need-crop" src="${esc(crop)}" alt="画像のこのマス">` : ''}<select data-day="${day}" aria-label="${esc(name)} ${day}日の勤務"><option value="">未確認</option>${choices.map(([c,l]) => `<option value="${esc(c)}"${value===c?' selected':''}>${esc(l)}</option>`).join('')}</select>${need ? `<button type="button" class="entry-add" data-day="${day}" aria-label="${day}日に入れる記号を新しく追加"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg></button>` : ''}</label>`;
     }).join('') : '<p>年月と氏名を入力すると、日別の入力欄が表示されます。</p>';
     this.count(); this.renderHints();
+  }
+  // 記号が増えたとき（「＋」や設定から追加）：一覧を新しくし、pick があればその日にその記号を入れる（選んだときと同じ流れ）。
+  setCodes(codes, pick) {
+    this.codes = codes; this.renderDays();
+    const sel = pick && this.root.querySelector(`.entry-days select[data-day="${pick.day}"]`);
+    if (!sel || !Object.hasOwn(codes, pick.code)) return;
+    sel.value = pick.code;
+    sel.dispatchEvent(new Event('change', { bubbles: true }));
+    sel.closest('label').scrollIntoView({ block: 'nearest' });
+    if (!matchMedia('(prefers-reduced-motion: reduce)').matches) sel.animate([{ boxShadow: '0 0 0 3px #67c8ff80' }, { boxShadow: '0 0 0 0 #67c8ff00' }], { duration: 900, easing: 'ease-out' });
   }
   count() {
     const total = this.days()*this.draft.names.length;

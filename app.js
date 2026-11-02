@@ -364,6 +364,7 @@ function renderSheet(mode, dir = 0) {
   else if (mine.kind === 'work') mineEl.textContent = mine.label;
   else if (mine.kind === 'off') mineEl.innerHTML = mine.label === mine.raw ? esc(mine.label) : `${mine.label}<small>${esc(mine.raw)}</small>`;
   else if (mine.kind === 'out') mineEl.textContent = '外出';
+  else if (mine.kind === 'other') mineEl.textContent = mine.label;   // 設定で足した「その他」の記号（研修など）
   else mineEl.innerHTML = `未確認<small>元の記号：${esc(mine.raw)}</small>`;
 
   const entries = people.map(p => ({ p, c: cellOf(key, p.id, d) })).filter(x => x.c);
@@ -406,10 +407,11 @@ function renderSheet(mode, dir = 0) {
   }).join('') : '<div class="nolane">この日の出勤者は登録されていません</div>') + nowLine(key, d);
 
   // お休み・外出・未確認の人は帯がないので、名前をタップして直す。
-  const group = kind => entries.filter(x => x.c.kind === kind).map(x => `<button type="button" class="rest-name" data-edit="${x.p.id}" aria-haspopup="listbox" aria-label="${esc(x.p.name)}さん ${esc(x.c.label)}。タップで変更">${esc(x.p.name)}${kind === 'off' && x.c.label !== 'お休み' ? `<small>${esc(x.c.label)}</small>` : ''}</button>`).join('');
+  const group = kind => entries.filter(x => x.c.kind === kind).map(x => `<button type="button" class="rest-name" data-edit="${x.p.id}" aria-haspopup="listbox" aria-label="${esc(x.p.name)}さん ${esc(x.c.label)}。タップで変更">${esc(x.p.name)}${(kind === 'off' && x.c.label !== 'お休み') || kind === 'other' ? `<small>${esc(x.c.label)}</small>` : ''}</button>`).join('');
   const rows = [];
   if (group('off')) rows.push(`<div class="rest"><span>お休み</span><b>${group('off')}</b></div>`);
   if (group('out')) rows.push(`<div class="rest"><span>外出</span><b>${group('out')}</b></div>`);
+  if (group('other')) rows.push(`<div class="rest"><span>その他</span><b>${group('other')}</b></div>`);
   if (group('unknown')) rows.push(`<div class="rest"><span>未確認</span><b>${group('unknown')}</b></div>`);
   if (month.scope === 'self') rows.push(`<div class="rest"><span>メモ</span><b>${m}月のみんなの勤務表はまだ登録されていません</b></div>`);
   $('.rests').innerHTML = rows.join('');
@@ -922,6 +924,8 @@ regMenu.addEventListener('click', e => {
   if (!item) return;
   if (job && !job.done) { closeRegMenu(); expandImporter(); return; }
   if (item.dataset.kind === 'history') { openHistory(); return; }
+  if (item.dataset.kind === 'share-send') { closeRegMenu(); openShareSend(); return; }
+  if (item.dataset.kind === 'share-receive') { closeRegMenu(); openReceive(); return; }
   pickFile(item.dataset.kind);   // ファイル選択はタップの直後に開く必要がある
   closeRegMenu();
 });
@@ -976,7 +980,9 @@ function setFile(i, animate = true) {
   previewUrl = job.kind === 'image' ? URL.createObjectURL(file) : null;
   preview.innerHTML = (job.kind === 'image'
     ? `<img alt="" src="${previewUrl}">`
-    : '<span class="ri-icon csv big" aria-hidden="true"><svg viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="3"/><path d="M3 9.5h18M3 14.5h18M9 4v16M15 4v16"/></svg></span>')
+    : job.kind === 'share'
+      ? '<span class="ri-icon receive big" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M12 4v11M8 11l4 4 4-4"/><path d="M5 13v5a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-5"/></svg></span>'
+      : '<span class="ri-icon csv big" aria-hidden="true"><svg viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="3"/><path d="M3 9.5h18M3 14.5h18M9 4v16M15 4v16"/></svg></span>')
     + '<div class="grid"></div><div class="scan"></div>';
   if (animate && !reduced()) {
     preview.animate([{ opacity: .3, transform: 'scale(.97)' }, { opacity: 1, transform: 'none' }], { duration: 320, easing: EASE });
@@ -1113,27 +1119,32 @@ function importFailure(err, kind) {
     return;
   }
   finishJob({ mark: 'warn', head: 'シフトの登録', title: '保存できませんでした', text: esc(err.message),
-    actions: [['ファイルを選び直す', 'primary', () => { closeImporter(); pickFile(kind); }], closeAction()] });
+    actions: [retryAction(job?.kind ?? kind), closeAction()] });
 }
+// やり直し：ファイルなら選び直し、共有なら貼り付け画面を開き直す。
+const retryAction = kind => kind === 'share'
+  ? ['貼り付け直す', 'primary', () => { closeImporter(); openReceive(); }]
+  : ['ファイルを選び直す', 'primary', () => { closeImporter(); pickFile(kind); }];
 async function runImport(kind, files) {
   if (job && !job.done) { expandImporter(); return; }
   const run = ++importRun, alive = () => run === importRun;
   hidePill();
   job = { kind, files, index: 0, minimized: false, done: false, result: null };
   openImporter(kind, files);
-  renderSteps(kind === 'image' ? ['画像を保存', '表を読み取り', '記号と氏名を照合', 'カレンダーへ反映'] : ['CSVを読み込み', '日付・氏名・記号を照合', '内容を確認', '保存']);
+  renderSteps(kind === 'image' ? ['画像を保存', '表を読み取り', '記号と氏名を照合', 'カレンダーへ反映'] : [kind === 'share' ? '共有を読み込み' : 'CSVを読み込み', '日付・氏名・記号を照合', '内容を確認', '保存']);
   setStep(0);
   try {
     if (kind === 'image') { await importImages(files, alive); return; }
     if (files.length > 12 || files.some(f => f.size > 1024 * 1024)) throw new Error('CSVは1回12件まで、1件1MB以内で選んでください。');
     const payload = [];
-    for (const file of files) { const text = decodeText(await file.arrayBuffer()); if (!alive()) return; payload.push({ name: file.name, text }); }
+    // 共有で受け取った分（share）は、送った側でも未登録だった日を飛ばして取り込む（skip）。
+    for (const file of files) { const text = decodeText(await file.arrayBuffer()); if (!alive()) return; payload.push(kind === 'share' ? { name: file.name, text, skip: true } : { name: file.name, text }); }
     setStep(1);
     const plan = await api('/api/prepare', { files: payload });
     if (!alive()) return;
     if (plan.issues.length) {
       finishJob({ mark: 'warn', head: 'まとめて確認してください', title: `${plan.issues.length}件の確認が必要です`, text: 'まだ保存していません。下記を修正してから選び直してください。未定義の記号や空欄には、時間を割り当てません。', notes: plan.issues.map(esc),
-        actions: [['ファイルを選び直す', 'primary', () => { closeImporter(); pickFile('csv'); }], closeAction()] }); return;
+        actions: [retryAction(kind), closeAction()] }); return;
     }
     if (!plan.changes.length) {
       finishJob({ mark: 'info', head: '照合が終わりました', title: 'すべて登録済みの内容です', text: `${plan.same}件を照合しました。重複や変更はありません。`, actions: [closeAction()] }); return;
@@ -1142,7 +1153,10 @@ async function runImport(kind, files) {
     job.review = true; job.pending = { payload, plan };
     showResult({ mark: 'info', head: '登録内容の確認', title: `${plan.changes.length}件を反映します`, text: `${plan.months.map(fmtMonth).join('・')}。記載のない日付と過去の月はそのまま保持します。`,
       stats: [[plan.changes.filter(w => w.before === '?').length, '新規'], [plan.changes.filter(w => w.before !== '?').length, '更新'], [plan.same, '変更なし']],
-      notes: [...plan.newPeople.map(p => `新しいメンバー：${esc(p.name)}（別名の場合は登録せずCSVの氏名を修正してください）`), ...plan.changes.map(w => `${esc(w.key)}-${String(w.d).padStart(2, '0')} ${esc(w.name)}：${esc(w.before)} → ${esc(w.code)}`)],
+      // 共有で初めて受け取ると全員が新しいメンバーになるので、1行にまとめて出す。
+      notes: [...(kind === 'share'
+        ? (plan.newPeople.length ? [`新しいメンバー（${plan.newPeople.length}人）：${plan.newPeople.map(p => esc(p.name)).join('・')}`, '同じ人が別の名前でいるときは、保存後にメンバー一覧の「名前」でまとめられます。'] : [])
+        : plan.newPeople.map(p => `新しいメンバー：${esc(p.name)}（別名の場合は登録せずCSVの氏名を修正してください）`)), ...plan.changes.map(w => `${esc(w.key)}-${String(w.d).padStart(2, '0')} ${esc(w.name)}：${esc(w.before)} → ${esc(w.code)}`)],
       actions: [['この内容で保存', 'primary', savePending], ['キャンセル', 'ghost', () => closeImporter(), true]] });
   } catch (err) { if (alive()) importFailure(err, kind); }
 }
@@ -1465,6 +1479,268 @@ renameInput.addEventListener('keydown', e => { if (e.key === 'Enter' && !e.isCom
 renameInput.addEventListener('input', () => { $('.rename-error').textContent = ''; });
 renameModal.addEventListener('cancel', e => { e.preventDefault(); closeRename(); });
 renameModal.addEventListener('keydown', e => { e.stopPropagation(); });
+
+// ---- 共有（サーバーなし）：選んだ月の勤務表（全員分）を文字にして LINE などで送り、相手は貼り付けて取り込む ----
+// 文字の形：「SHIFUNO:1:z:」の後に、勤務表（JSON）を縮めて base64url にしたもの（z は圧縮、j は圧縮なし）。
+// 受け取った勤務表は CSV と同じ形に組み立てて、CSV の登録と同じ流れ（照合 → 確認 → 上書き確認 → 保存）に乗せる。
+const SHARE_RE = /SHIFUNO:1:([zj]):([A-Za-z0-9_-]+)/;
+const b64url = bytes => { let s = ''; for (let i = 0; i < bytes.length; i += 0x8000) s += String.fromCharCode(...bytes.subarray(i, i + 0x8000)); return btoa(s).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, ''); };
+const unb64url = s => Uint8Array.from(atob(s.replace(/-/g, '+').replace(/_/g, '/')), c => c.charCodeAt(0));
+const pipeBytes = async (bytes, stream) => new Uint8Array(await new Response(new Blob([bytes]).stream().pipeThrough(stream)).arrayBuffer());
+const shareMonths = () => Object.keys(DATA.months).filter(k => Object.keys(DATA.months[k].shifts ?? {}).some(id => people.some(p => p.id === id))).sort();
+const shareRows = key => Object.entries(DATA.months[key]?.shifts ?? {}).map(([id, codes]) => [people.find(p => p.id === id)?.name, codes]).filter(([n]) => n);
+// 設定で足した記号を使っている月を送るときは、その記号も一緒に送る（受け取った側に無ければ自動で足す）。
+const shareCodes = keys => Object.fromEntries(Object.entries(DATA.codes)
+  .filter(([k, v]) => v.custom && keys.some(key => shareRows(key).some(r => r[1].split(/\s+/).includes(k))))
+  .map(([k, v]) => [k, v.kind === 'work' ? { kind: v.kind, start: v.start, end: v.end } : { kind: v.kind }]));
+async function encodeShare(keys) {
+  const codes = shareCodes(keys);
+  const raw = new TextEncoder().encode(JSON.stringify({ v: 1, m: keys.map(key => [key, shareRows(key)]), ...(Object.keys(codes).length ? { c: codes } : {}) }));
+  const z = typeof CompressionStream === 'function';
+  return `SHIFUNO:1:${z ? 'z' : 'j'}:${b64url(z ? await pipeBytes(raw, new CompressionStream('deflate-raw')) : raw)}`;
+}
+async function decodeShare(text) {
+  const hit = String(text).match(SHARE_RE);
+  if (!hit) throw new Error('シフノの共有が見つかりません。届いたメッセージをまるごとコピーして貼り付けてください。');
+  let data;
+  try {
+    let bytes = unb64url(hit[2]);
+    if (hit[1] === 'z') bytes = await pipeBytes(bytes, new DecompressionStream('deflate-raw'));
+    data = JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(bytes));
+  } catch { throw new Error('共有の内容を読み取れませんでした。途中で切れていないか確かめて、もう一度コピーしてください。'); }
+  const ok = data?.v === 1 && Array.isArray(data.m) && data.m.length >= 1 && data.m.length <= 12 && data.m.every(m => Array.isArray(m) && /^(20\d{2}|2100)-(0[1-9]|1[0-2])$/.test(m[0]) && Array.isArray(m[1]) && m[1].length >= 1 && m[1].length <= 100
+    && m[1].every(r => Array.isArray(r) && typeof r[0] === 'string' && r[0].trim() && r[0].length <= 40 && typeof r[1] === 'string' && r[1].length <= 1000));
+  const codes = data.c && typeof data.c === 'object' && !Array.isArray(data.c) ? Object.entries(data.c).slice(0, 40)
+    .filter(([k, v]) => typeof k === 'string' && [...k].length <= 8 && ['work', 'off', 'other'].includes(v?.kind)) : [];
+  if (!ok) throw new Error('共有の内容が正しくありません。もう一度コピーしてください。');
+  return { months: data.m, codes };
+}
+// 受け取った勤務表 → CSV の登録と同じ形のファイル（1行目：年月,氏名…／2行目から：日,記号…）。
+function shareFiles(months) {
+  const q = s => `"${String(s).replace(/"/g, '""')}"`;
+  return months.map(([key, rows]) => {
+    const [y, mo] = key.split('-').map(Number), days = new Date(y, mo, 0).getDate(), cells = rows.map(r => r[1].trim().split(/\s+/));
+    const lines = [[key, ...rows.map(r => r[0])], ...Array.from({ length: days }, (_, i) => [String(i + 1), ...cells.map(c => c[i] ?? '?')])];
+    return new File([lines.map(r => r.map(q).join(',')).join('\n')], `共有-${fmtMonth(key)}`, { type: 'text/csv' });
+  });
+}
+// 共有の2つの画面（送る・受け取る）は、上書き確認・名前を直すと同じ見た目と出入りの動き。
+function showSheetModal(modal, focusEl) {
+  modal.classList.remove('is-closing');
+  modal.querySelectorAll('button').forEach(b => { b.disabled = false; });
+  modal.showModal();
+  focusEl?.focus({ preventScroll: true });
+  if (reduced()) return;
+  modal.animate([{ opacity: 0, transform: 'translateY(22px) scale(.96)' }, { opacity: 1, transform: 'none' }], { duration: 380, easing: 'cubic-bezier(.22,1,.36,1)' });
+  modal.querySelector('.overwrite-emblem').animate([{ transform: 'rotate(-24deg) scale(.75)' }, { transform: 'none' }], { duration: 520, easing: 'cubic-bezier(.34,1.3,.64,1)' });
+  [...modal.children].filter(el => !el.matches('.overwrite-close,.overwrite-emblem,[hidden]')).forEach((el, i) => {
+    el.animate([{ opacity: 0, transform: 'translateY(7px)' }, { opacity: 1, transform: 'none' }], { duration: 300, delay: 60 + i * 35, easing: EASE, fill: 'backwards' });
+  });
+}
+async function hideSheetModal(modal) {
+  if (!modal.open || modal.classList.contains('is-closing')) return;
+  modal.classList.add('is-closing');
+  modal.querySelectorAll('button').forEach(b => { b.disabled = true; });
+  if (!reduced()) await modal.animate([{ opacity: 1, transform: 'none' }, { opacity: 0, transform: 'translateY(10px) scale(.98)' }], { duration: 180, easing: 'cubic-bezier(.4,0,1,1)' }).finished.catch(() => {});
+  modal.close(); modal.classList.remove('is-closing');
+}
+function modalError(modal, text, shakeEl) {
+  const el = modal.querySelector('.rename-error');
+  el.textContent = text;
+  if (text && !reduced()) (shakeEl ?? el).animate([{ transform: 'none' }, { transform: 'translateX(-6px)' }, { transform: 'translateX(5px)' }, { transform: 'translateX(-3px)' }, { transform: 'none' }], { duration: 320, easing: 'ease-out' });
+}
+const doneToast = text => hideToastLater(showToast({ text }), 4500);
+
+// 送る：月を選ぶ（今月以降の登録済みの月をはじめから選んでおく）→ スマホの共有画面（LINE など）。
+// 共有画面はタップの直後に開く必要があるので、送る文字は月を選んだ時点で先に作っておく。
+const shareModal = $('.share-modal');
+let shareKeys = new Set(), shareText = null, shareBuild = 0;
+function openShareSend() {
+  const months = shareMonths();
+  if (!months.length) { hideToastLater(showToast({ text: 'まだ共有できるシフトがありません<br><small>先にシフトを登録してください。</small>', warn: true }), 4500); return; }
+  const ahead = months.filter(k => k >= today.key);
+  shareKeys = new Set(ahead.length ? ahead : [months.at(-1)]);
+  $('.share-months').innerHTML = months.map(k => `<button type="button" data-key="${k}" aria-pressed="${shareKeys.has(k)}">${esc(fmtMonth(k))}</button>`).join('');
+  $('.share-fallback').hidden = true; $('.share-fallback').value = '';
+  modalError(shareModal, '');
+  rebuildShare();
+  showSheetModal(shareModal, $('.share-yes'));
+}
+function rebuildShare() {
+  const run = ++shareBuild, keys = [...shareKeys].sort();
+  shareText = null;
+  $('.share-yes').disabled = !keys.length;
+  const names = new Set(keys.flatMap(k => shareRows(k).map(r => r[0])));
+  $('.share-note').innerHTML = keys.length ? `${keys.map(k => `${Number(k.slice(5))}月`).join('・')}の勤務表（${names.size}人分）を送ります` : '送る月を選んでください';
+  if (!keys.length) return;
+  encodeShare(keys).then(code => {
+    if (run === shareBuild) shareText = `シフノのシフト（${keys.map(fmtMonth).join('・')}）\nシフノを開いて「＋シフトを登録」→「共有を受け取る」に、このメッセージをまるごと貼り付けてください。\n${code}`;
+  }, () => { if (run === shareBuild) modalError(shareModal, '共有する文字を作れませんでした。もう一度お試しください。'); });
+}
+$('.share-months').addEventListener('click', e => {
+  const b = e.target.closest('button[data-key]');
+  if (!b) return;
+  const on = !shareKeys.has(b.dataset.key);
+  if (on) shareKeys.add(b.dataset.key); else shareKeys.delete(b.dataset.key);
+  b.setAttribute('aria-pressed', String(on));
+  if (!reduced()) b.animate([{ transform: 'scale(1)' }, { transform: on ? 'scale(1.1)' : 'scale(.92)', offset: .45 }, { transform: 'none' }], { duration: 300, easing: EASE });
+  $('.share-fallback').hidden = true;
+  rebuildShare();
+});
+async function sendShare() {
+  const text = shareText;
+  if (!text) return;
+  modalError(shareModal, '');
+  if (navigator.share) {
+    try { await navigator.share({ text }); await hideSheetModal(shareModal); doneToast('共有しました<br><small>相手はシフノの「共有を受け取る」で取り込めます。</small>'); return; }
+    catch (e) { if (e?.name === 'AbortError') return; }
+  }
+  // 共有画面が使えないとき：文字をコピーして、LINE などに自分で貼り付けて送ってもらう。
+  try { await navigator.clipboard.writeText(text); await hideSheetModal(shareModal); doneToast('コピーしました<br><small>LINE などに貼り付けて送ってください。</small>'); }
+  catch {
+    const box = $('.share-fallback');
+    box.value = text; box.hidden = false; box.focus(); box.select();
+    modalError(shareModal, 'この端末では共有画面を開けませんでした。上の文字をすべてコピーして送ってください。');
+  }
+}
+$('.share-yes').addEventListener('click', sendShare);
+$('.share-no').addEventListener('click', () => hideSheetModal(shareModal));
+$('.share-close').addEventListener('click', () => hideSheetModal(shareModal));
+shareModal.addEventListener('cancel', e => { e.preventDefault(); hideSheetModal(shareModal); });
+shareModal.addEventListener('keydown', e => { e.stopPropagation(); });
+
+// 受け取る：届いたメッセージを貼り付け → 読めたら CSV と同じ確認画面へ（保存するまでは何も変わらない）。
+const receiveModal = $('.receive-modal'), receiveText = $('.receive-text');
+function openReceive() {
+  if (job && !job.done) { expandImporter(); return; }
+  receiveText.value = '';
+  modalError(receiveModal, '');
+  $('.receive-paste').hidden = !navigator.clipboard?.readText;
+  showSheetModal(receiveModal, navigator.clipboard?.readText ? $('.receive-paste') : receiveText);
+}
+async function pasteReceive() {
+  try { receiveText.value = await navigator.clipboard.readText(); modalError(receiveModal, ''); if (SHARE_RE.test(receiveText.value)) $('.receive-yes').focus({ preventScroll: true }); }
+  catch { modalError(receiveModal, '貼り付けできませんでした。入力欄を長押しして「ペースト」を選んでください。'); receiveText.focus(); }
+}
+async function takeReceive() {
+  try {
+    const { months, codes } = await decodeShare(receiveText.value);
+    // 送った側で足した記号がこの端末に無ければ、先に足しておく（無いと「未定義の記号」で取り込めない）。
+    for (const [code, def] of codes) {
+      if (Object.hasOwn(DATA.codes, code)) continue;
+      try { acceptData((await api('/api/code', { code, kind: def.kind, start: def.start, end: def.end, revision: DATA.revision })).data); } catch {}
+    }
+    await hideSheetModal(receiveModal);
+    runImport('share', shareFiles(months));
+  } catch (e) { modalError(receiveModal, e.message, receiveText); }
+}
+$('.receive-paste').addEventListener('click', pasteReceive);
+$('.receive-yes').addEventListener('click', takeReceive);
+$('.receive-no').addEventListener('click', () => hideSheetModal(receiveModal));
+$('.receive-close').addEventListener('click', () => hideSheetModal(receiveModal));
+receiveText.addEventListener('input', () => modalError(receiveModal, ''));
+receiveModal.addEventListener('cancel', e => { e.preventDefault(); hideSheetModal(receiveModal); });
+receiveModal.addEventListener('keydown', e => { e.stopPropagation(); });
+
+// ---- メンバー一覧の右下：共有・設定 ----
+const footShare = $('.foot-share'), footSettings = $('.foot-settings');
+footShare.addEventListener('click', () => {
+  if (!reduced()) footShare.querySelector('svg').animate([{ transform: 'none' }, { transform: 'translateY(-4px)', offset: .4 }, { transform: 'none' }], { duration: 380, easing: EASE });
+  openShareSend();
+});
+footSettings.addEventListener('click', () => {
+  if (!reduced()) footSettings.querySelector('svg').animate([{ transform: 'rotate(0)' }, { transform: 'rotate(120deg)' }], { duration: 520, easing: 'cubic-bezier(.34,1.3,.64,1)' });
+  openSettings();
+});
+
+// ---- 設定：勤務の記号（はじめからある記号と、手で足した記号）。足した記号は削除できる ----
+const settingsModal = $('.settings-modal'), codeList = $('.code-list');
+const TRASH = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16M10 11v6M14 11v6M6 7l1 12a2 2 0 0 0 2 2h6a2 2 0 0 0 2-2l1-12M9 7V4h6v3"/></svg>';
+const kindText = c => c.kind === 'work' ? `${c.start}–${c.end}` : c.kind === 'off' ? 'お休み' : c.kind === 'out' ? '外出' : 'その他';
+function renderCodeList(fresh) {
+  // 勤務は始まりの早い順、そのあとお休み・その他。足した記号には「追加」の印を付ける。
+  const order = { work: 0, off: 1, out: 2, other: 3 };
+  const list = Object.entries(DATA.codes).sort(([, a], [, b]) => order[a.kind] - order[b.kind] || (a.kind === 'work' ? toHour(a.start) - toHour(b.start) : 0));
+  codeList.innerHTML = list.map(([k, c]) => `<li data-code="${esc(k)}"><span class="cc">${esc(k)}</span><span class="cs">${esc(kindText(c))}${c.custom ? '<em>追加</em>' : ''}</span>${c.custom ? `<button type="button" class="code-del" aria-label="「${esc(k)}」を削除">${TRASH}</button>` : '<span></span>'}</li>`).join('');
+  const li = fresh && codeList.querySelector(`li[data-code="${CSS.escape(fresh)}"]`);
+  if (li) {
+    li.scrollIntoView({ block: 'nearest' });
+    if (!reduced()) li.animate([{ opacity: 0, transform: 'translateX(14px)', background: '#67c8ff40' }, { opacity: 1, transform: 'none', background: '#67c8ff40', offset: .5 }, { background: 'transparent' }], { duration: 900, easing: EASE });
+  }
+}
+function openSettings() {
+  modalError(settingsModal, '');
+  renderCodeList();
+  showSheetModal(settingsModal, $('.settings-done'));
+  if (!reduced()) codeList.querySelectorAll('li').forEach((li, i) => li.animate([{ opacity: 0, transform: 'translateY(6px)' }, { opacity: 1, transform: 'none' }], { duration: 260, delay: 140 + Math.min(i, 12) * 22, easing: EASE, fill: 'backwards' }));
+}
+codeList.addEventListener('click', async e => {
+  const b = e.target.closest('.code-del'); if (!b) return;
+  const li = b.closest('li'), code = li.dataset.code;
+  modalError(settingsModal, '');
+  try {
+    const r = await api('/api/code', { remove: true, code, revision: DATA.revision });
+    if (!reduced()) await li.animate([{ opacity: 1, transform: 'none' }, { opacity: 0, transform: 'translateX(-18px)' }], { duration: 200, easing: 'cubic-bezier(.4,0,1,1)', fill: 'forwards' }).finished;
+    acceptData(r.data); renderCodeList();
+  } catch (err) { modalError(settingsModal, err.message, li); if (err.status === 409) { acceptData(await api('/api/data')); renderCodeList(); } }
+});
+$('.set-add').addEventListener('click', () => openCodeAdd(code => renderCodeList(code)));
+$('.settings-done').addEventListener('click', () => hideSheetModal(settingsModal));
+$('.settings-close').addEventListener('click', () => hideSheetModal(settingsModal));
+settingsModal.addEventListener('cancel', e => { e.preventDefault(); hideSheetModal(settingsModal); });
+settingsModal.addEventListener('keydown', e => { e.stopPropagation(); });
+
+// ---- 記号を追加：名前（勤務表に書かれている言葉）と種類。勤務なら時間も ----
+// 設定の「記号を追加」と、手入力の登録画面の「＋」から開く。足せたら onAdded(記号) を呼ぶ。
+const codeModal = $('.code-modal'), codeInput = $('.code-name');
+let codeKind = 'work', codeAdded = null;
+function setCodeKind(kind, animate) {
+  codeKind = kind;
+  codeModal.querySelectorAll('.code-kind button').forEach(b => b.setAttribute('aria-pressed', String(b.dataset.kind === kind)));
+  const time = $('.code-time'), was = time.hidden;
+  time.hidden = kind !== 'work';
+  $('.code-desc').innerHTML = kind === 'work' ? 'カレンダーに時間を出し、出勤人数にも数えます。' : kind === 'off' ? 'カレンダーには「お休み」と出します。' : 'カレンダーには、この記号の言葉をそのまま出します。';
+  if (animate && !reduced() && was && !time.hidden) time.animate([{ opacity: 0, transform: 'translateY(-6px)' }, { opacity: 1, transform: 'none' }], { duration: 260, easing: EASE });
+}
+function openCodeAdd(onAdded) {
+  codeAdded = onAdded;
+  codeInput.value = ''; $('.code-start').value = '09:00'; $('.code-end').value = '18:00';
+  setCodeKind('work', false);
+  modalError(codeModal, '');
+  showSheetModal(codeModal, codeInput);
+}
+codeModal.querySelector('.code-kind').addEventListener('click', e => {
+  const b = e.target.closest('button[data-kind]'); if (!b || b.dataset.kind === codeKind) return;
+  setCodeKind(b.dataset.kind, true);
+  if (!reduced()) b.animate([{ transform: 'scale(.94)' }, { transform: 'none' }], { duration: 220, easing: EASE });
+});
+async function submitCode() {
+  const btn = $('.code-yes'); if (btn.disabled) return;
+  btn.disabled = true; modalError(codeModal, '');
+  try {
+    const r = await api('/api/code', { code: codeInput.value, kind: codeKind, start: $('.code-start').value, end: $('.code-end').value, revision: DATA.revision });
+    acceptData(r.data);
+    await hideSheetModal(codeModal);
+    doneToast(`記号「${esc(r.code)}」を追加しました<br><small>${esc(kindText(DATA.codes[r.code]))}</small>`);
+    const cb = codeAdded; codeAdded = null; cb?.(r.code);
+  } catch (err) {
+    modalError(codeModal, err.message, /時間/.test(err.message) ? $('.code-time') : codeInput);
+    if (err.status === 409) acceptData(await api('/api/data'));
+  } finally { if (codeModal.open && !codeModal.classList.contains('is-closing')) btn.disabled = false; }
+}
+$('.code-yes').addEventListener('click', submitCode);
+codeInput.addEventListener('keydown', e => { if (e.key === 'Enter' && !e.isComposing) { e.preventDefault(); submitCode(); } });
+codeInput.addEventListener('input', () => modalError(codeModal, ''));
+$('.code-no').addEventListener('click', () => { codeAdded = null; hideSheetModal(codeModal); });
+$('.code-close').addEventListener('click', () => { codeAdded = null; hideSheetModal(codeModal); });
+codeModal.addEventListener('cancel', e => { e.preventDefault(); codeAdded = null; hideSheetModal(codeModal); });
+codeModal.addEventListener('keydown', e => { e.stopPropagation(); });
+// 手入力の登録画面：確認が必要な日の「＋」→ 記号を追加 → 足した記号をその日に入れる。
+$('.imp-editor').addEventListener('click', e => {
+  const b = e.target.closest('.entry-add'); if (!b || !job?.entry) return;
+  const day = b.dataset.day, entry = job.entry;
+  openCodeAdd(code => entry.setCodes(DATA.codes, { day, code }));
+});
 
 async function savePending() {
   if (!job?.pending || job.saving || job.confirming) return;
@@ -1818,6 +2094,11 @@ function openDrawer() {
   menuBtn.setAttribute('aria-expanded', 'true');
   if (!reduced()) peopleEl.querySelectorAll('li').forEach((li, i) => li.animate([{ opacity: 0, transform: 'translateX(28px)' }, { opacity: 1, transform: 'none' }],
     { duration: 440, delay: 110 + Math.min(i, 14) * 26, easing: EASE, fill: 'backwards' }));
+  // 右下の共有・設定：一覧が入りきった頃に、丸がポンと弾んで出る（設定の歯車は少し回る）。
+  if (!reduced()) drawer.querySelectorAll('.foot-btn').forEach((b, i) => {
+    b.animate([{ opacity: 0, transform: 'scale(.4)' }, { opacity: 1, transform: 'scale(1.08)', offset: .65 }, { opacity: 1, transform: 'none' }], { duration: 460, delay: 260 + i * 70, easing: EASE, fill: 'backwards' });
+    b.querySelector('svg').animate([{ transform: b.classList.contains('foot-settings') ? 'rotate(-90deg)' : 'translateY(5px)' }, { transform: 'none' }], { duration: 560, delay: 300 + i * 70, easing: 'cubic-bezier(.34,1.4,.64,1)', fill: 'backwards' });
+  });
   // 表示中の人が見える位置へ一覧だけをスクロール（scrollIntoView は外側までずらしてカクつくので使わない）。
   const current = peopleEl.querySelector('.person.current');
   peopleEl.scrollTop = current && current.offsetTop + current.offsetHeight > peopleEl.clientHeight ? current.offsetTop - peopleEl.clientHeight / 2 : 0;
