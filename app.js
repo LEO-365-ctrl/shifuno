@@ -1618,22 +1618,41 @@ function openReceive() {
   $('.receive-paste').hidden = !navigator.clipboard?.readText;
   showSheetModal(receiveModal, navigator.clipboard?.readText ? $('.receive-paste') : receiveText);
 }
-async function pasteReceive() {
-  try { receiveText.value = await navigator.clipboard.readText(); modalError(receiveModal, ''); if (SHARE_RE.test(receiveText.value)) $('.receive-yes').focus({ preventScroll: true }); }
-  catch { modalError(receiveModal, '貼り付けできませんでした。入力欄を長押しして「ペースト」を選んでください。'); receiveText.focus(); }
+// 貼り付けた内容が共有なら、「取り込む」を押さなくてもそのまま確認画面へ進む。
+// iPhone では、ほかのアプリでコピーした内容を読むたびに「ペースト」の確認が出る（省けない）ので、その次の1回を省く。
+function autoReceive() {
+  if (!SHARE_RE.test(receiveText.value) || !receiveModal.open || receiveModal.classList.contains('is-closing')) return false;
+  if (!reduced()) {
+    receiveText.animate([{ boxShadow: '0 0 0 3px #67c8ff99' }, { boxShadow: '0 0 0 0 #67c8ff00' }], { duration: 520, easing: 'ease-out' });
+    $('.receive-yes').animate([{ transform: 'scale(1)' }, { transform: 'scale(.94)', offset: .4 }, { transform: 'none' }], { duration: 300, easing: EASE });
+  }
+  setTimeout(takeReceive, reduced() ? 0 : 340);   // 入ったことが目で分かるだけ待ってから進む
+  return true;
 }
+async function pasteReceive() {
+  try {
+    receiveText.value = await navigator.clipboard.readText(); modalError(receiveModal, '');
+    if (!autoReceive()) modalError(receiveModal, 'コピーした内容に、シフノの共有が見つかりません。届いたメッセージをまるごとコピーし直してください。', receiveText);
+  } catch { modalError(receiveModal, '貼り付けできませんでした。入力欄を長押しして「ペースト」を選んでください。'); receiveText.focus(); }
+}
+let receiving = false;
 async function takeReceive() {
+  if (receiving) return;   // 自動で進むのと「取り込む」が重なっても1回だけ
+  receiving = true;
   try {
     const { months, codes } = await decodeShare(receiveText.value);
     // 送った側で足した記号がこの端末に無ければ、先に足しておく（無いと「未定義の記号」で取り込めない）。
     for (const [code, def] of codes) {
       if (Object.hasOwn(DATA.codes, code)) continue;
-      try { acceptData((await api('/api/code', { code, kind: def.kind, start: def.start, end: def.end, revision: DATA.revision })).data); } catch {}
+      try { acceptData((await api('/api/code', { code, kind: def.kind, start: def.start, end: def.end })).data); } catch {}
     }
     await hideSheetModal(receiveModal);
     runImport('share', shareFiles(months));
   } catch (e) { modalError(receiveModal, e.message, receiveText); }
+  finally { receiving = false; }
 }
+// 入力欄を長押しして「ペースト」したときも、共有なら同じように自動で進む。
+receiveText.addEventListener('paste', () => setTimeout(autoReceive, 0));
 $('.receive-paste').addEventListener('click', pasteReceive);
 $('.receive-yes').addEventListener('click', takeReceive);
 $('.receive-no').addEventListener('click', () => hideSheetModal(receiveModal));
