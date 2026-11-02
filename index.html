@@ -396,7 +396,8 @@ svg.icon{width:17px;height:17px;fill:none;stroke:currentColor;stroke-width:1.8;s
 /* ---- 登録作業中の画面：勤務表と同じ紫 ---- */
 .importer{position:absolute;inset:0;z-index:10;overflow-y:auto;overscroll-behavior:contain;background:var(--paper);color:var(--ink);
   padding:calc(28px + env(safe-area-inset-top)) calc(22px + env(safe-area-inset-right)) calc(24px + env(safe-area-inset-bottom)) calc(22px + env(safe-area-inset-left))}
-.importer{transform-origin:calc(100% - 40px) calc(100% - 40px);touch-action:pan-y}
+/* 登録の画面は縦にだけ動かす（中身が少しはみ出しても、横にはずれない） */
+.importer{transform-origin:calc(100% - 40px) calc(100% - 40px);touch-action:pan-y;overflow-x:hidden}
 .importer[hidden],.importer [hidden]{display:none!important}
 .imp-body{max-width:380px;margin:0 auto;display:flex;flex-direction:column;gap:18px;min-height:100%}
 .imp-grab{width:40px;height:4px;margin:-16px auto -8px;border-radius:4px;background:var(--line)}
@@ -560,6 +561,23 @@ svg.icon{width:17px;height:17px;fill:none;stroke:currentColor;stroke-width:1.8;s
 .entry-add:active{transform:scale(.86) rotate(90deg)}
 .entry-add svg{width:17px;height:17px;fill:none;stroke:currentColor;stroke-width:2.2;stroke-linecap:round}
 
+/* ---- スマホを横にしたとき：縦向きに戻す案内（Android のホーム画面アプリは manifest の portrait で縦に固定される） ---- */
+.rotate-note{display:none}
+@media (orientation:landscape) and (max-height:520px) and (pointer:coarse){
+  .rotate-note{position:fixed;inset:0;z-index:100;display:flex;align-items:center;justify-content:center;gap:22px;padding:env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left);
+    background:light-dark(#fffaf8,#2c2525);color:light-dark(#553f42,#f4e6e7);animation:rotate-note-in 260ms ease both}
+  .rotate-note p{display:grid;gap:4px;margin:0;text-align:left}
+  .rotate-note b{font-size:17px;font-weight:650}
+  .rotate-note small{font-size:12px;color:light-dark(#9b7c80,#c4a9ad)}
+  .rotate-phone{width:64px;height:64px;display:grid;place-items:center;border-radius:20px;background:light-dark(#f6e9e5,#4a3339);color:light-dark(#a96576,#e4a4b4)}
+  .rotate-phone svg{width:40px;height:40px;fill:none;stroke:currentColor;stroke-width:2.4;stroke-linecap:round;stroke-linejoin:round;animation:rotate-phone 2.2s cubic-bezier(.65,0,.35,1) .3s infinite}
+  .app{visibility:hidden}
+}
+/* 横向きのスマホが、くるっと縦へ戻る動き */
+@keyframes rotate-phone{0%,20%{transform:rotate(-90deg)}55%,100%{transform:rotate(0)}}
+@keyframes rotate-note-in{from{opacity:0}to{opacity:1}}
+@media (prefers-reduced-motion:reduce){.rotate-phone svg{animation:none}.rotate-note{animation:none}}
+
 /* ---- デスクトップではスマホ枠で表示 ---- */
 @media (min-width:600px){
   body{display:flex;align-items:center;justify-content:center;min-height:100%;background-color:light-dark(#f3eff1,#1a1a1a);
@@ -587,6 +605,9 @@ svg.icon{width:17px;height:17px;fill:none;stroke:currentColor;stroke-width:1.8;s
 .imp-editor{display:grid;gap:16px;width:100%;min-width:0}.imp-editor[hidden]{display:none}
 .imp-editor label{display:grid;gap:7px;text-align:left;font-size:12px;font-weight:600}
 .imp-editor input,.imp-editor textarea,.imp-editor select{font:inherit;font-size:16px;width:100%;min-width:0;padding:11px;border-radius:11px;border:1px solid var(--line);background:var(--paper);color:var(--ink);box-sizing:border-box}
+/* iPhone の年月の入力欄は、幅の指定を無視して画面の外へ広がり、画面全体が横にずれる。見た目の部品を外して幅いっぱいに収める */
+.imp-editor input[type="month"]{-webkit-appearance:none;appearance:none;display:block;max-width:100%;min-height:46px;text-align:left}
+.imp-editor input[type="month"]::-webkit-date-and-time-value{text-align:left;min-height:1.4em}
 .entry-source{display:grid;gap:8px;position:sticky;top:0;z-index:2;background:var(--paper);padding:6px 0}.entry-source img{width:100%;max-height:140px;object-fit:contain;background:var(--soft);border-radius:14px}
 .entry-zoom{border:1px solid var(--line);border-radius:10px;background:var(--soft);padding:10px;min-height:44px}
 .entry-help,.entry-count,.entry-status{font-size:12px;margin:0;white-space:pre-line;overflow-wrap:anywhere}.entry-help{color:var(--muted)}
@@ -820,6 +841,11 @@ svg.icon{width:17px;height:17px;fill:none;stroke:currentColor;stroke-width:1.8;s
     <span class="pill-text"><b>登録中</b><small>0%</small></span>
   </button>
 </main>
+<!-- スマホを横にしたとき（iPhone は画面の向きを固定できないため）：アプリを隠して、縦向きに戻す案内を出す -->
+<div class="rotate-note" aria-hidden="true">
+  <div class="rotate-phone"><svg viewBox="0 0 48 48"><rect x="15" y="5" width="18" height="38" rx="4"/><path d="M21 38h6"/></svg></div>
+  <p><b>縦向きでお使いください</b><small>シフノは縦向きの画面に合わせて作っています</small></p>
+</div>
 <script src="seed.js"></script>
 <script src="local-store.js"></script>
 <script src="holidays.js"></script>

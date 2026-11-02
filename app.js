@@ -1197,6 +1197,11 @@ function draftFromRead(read) {
         ? `画像下の集計（公休数 ${s.off ?? '?'}・有休 ${s.paid ?? '?'}）と、読み取った記号の数（公休 ${s.counted?.off}・有休 ${s.counted?.paid}）が合いません。この人の記号を確認してください。`
         : '有休・育休を含むのに、画像下の集計で確かめられませんでした。この人の記号を確認してください。';
     }
+    // ほとんど読めなかった人：記号の一覧にない言葉（休職など）が並んでいることが多い。「＋」で足せば、同じ形の日にまとめて入る。
+    if (unknown.length >= col.cells.length * .8) {
+      const more = '記号の一覧にない言葉（休職など）かもしれません。確認が必要な日の横の「＋」でその記号を足すと、同じ形の日にまとめて入ります。';
+      hints.people[name] = `この人のマスをほとんど読めませんでした。${more}${hints.people[name] ? `（${hints.people[name]}）` : ''}`;
+    }
   });
   return { draft: { month: read.month ?? '', names, cells }, issues, hints, warnings: read.cut ? ['画像の右端で切れている列がありました（読み取っていません）。そこに別の人の勤務があれば、端まで写した画像で登録し直してください。'] : [] };
 }
