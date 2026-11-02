@@ -2164,12 +2164,21 @@ const PENCIL = '<svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="
 let meId = null;
 try { meId = localStorage.getItem('shift-me'); } catch {}
 if (!people.some(p => p.id === meId)) meId = null;
-const visibleFavs = () => [...favorites].filter(id => id !== meId).map(id => people.find(p => p.id === id)).filter(Boolean);
+// 一覧に出すのは、表示中の月の勤務表にいる人だけ（辞めた・異動した人が残り続けて名前が増えないように）。
+// まだ登録していない月は、その前で一番近い登録済みの月（なければ後で一番近い月）の顔ぶれ。自分はいつも出す。
+function rosterOf(key) {
+  const keys = monthKeys.filter(k => Object.keys(DATA.months[k].shifts ?? {}).length);
+  const at = keys.includes(key) ? key : keys.filter(k => k < key).at(-1) ?? keys.find(k => k > key);
+  return at ? new Set(Object.keys(DATA.months[at].shifts)) : null;
+}
+const listed = (p, roster) => p.id === meId || !roster || roster.has(p.id);
+const visibleFavs = (roster = rosterOf(state.view)) => [...favorites].filter(id => id !== meId).map(id => people.find(p => p.id === id)).filter(p => p && listed(p, roster));
 function renderPeople() {
   openRow = null;   // 描き直すと開いていたスワイプは閉じた状態に戻る
   // 自分 → お気に入り（登録した順・並べ替えた順）→ それ以外（元の列順）。
-  const me = people.find(p => p.id === meId), favs = visibleFavs();
-  const rest = people.filter(p => !favorites.has(p.id) && p.id !== meId);
+  const roster = rosterOf(state.view);
+  const me = people.find(p => p.id === meId), favs = visibleFavs(roster);
+  const rest = people.filter(p => !favorites.has(p.id) && p.id !== meId && listed(p, roster));
   const item = (p, i, section) => {
     const fav = favorites.has(p.id), isMe = section === 'me', inFav = section === 'fav';
     return `<li class="person${p === self ? ' current' : ''}${inFav ? ' is-fav' : ''}${isMe ? ' is-me' : ''}" data-id="${esc(p.id)}">`
@@ -2440,10 +2449,11 @@ function endReorder(e, cancelled) {
   if (cancelled) { r.to = r.from; r.rows.forEach(row => { if (row.li !== r.li) row.li.style.transform = ''; }); r.ph.style.top = `${r.rows[r.from].top}px`; }
   r.li.style.transform = `translateY(${finalY}px)`;
   const commit = () => {
-    // 並べ替えたのは「自分」を除いたお気に入りの並び。自分がお気に入りでもあれば後ろに残しておく。
-    const ids = visibleFavs().map(p => p.id), [moved] = ids.splice(r.from, 1);
+    // 並べ替えたのは、一覧に出ている（自分を除いた）お気に入りの並び。出ていない人は元の場所のまま残す。
+    const ids = visibleFavs().map(p => p.id), shown = new Set(ids), [moved] = ids.splice(r.from, 1);
     ids.splice(to, 0, moved);
-    favorites = new Set([...ids, ...[...favorites].filter(id => !ids.includes(id))]); saveFavorites();
+    let k = 0;
+    favorites = new Set([...favorites].map(id => shown.has(id) ? ids[k++] : id)); saveFavorites();
     peopleEl.classList.remove('reordering');
     renderPeople();
     const row = peopleEl.querySelector(`.person[data-id="${CSS.escape(r.id)}"]`);
@@ -2655,8 +2665,10 @@ peopleEl.addEventListener('keydown', e => {
     else { openRowAt(li); settleRow(li, rowOffset(li), side * SA_OPEN); const b = li.querySelector(side > 0 ? '.sa-me' : '.sa-name'); b.tabIndex = 0; b.focus(); }
   }
   if (li?.classList.contains('is-fav') && e.altKey && ['ArrowUp', 'ArrowDown'].includes(e.key)) {
-    e.preventDefault(); const ids = [...favorites], i = ids.indexOf(li.dataset.id), j = i + (e.key === 'ArrowUp' ? -1 : 1);
-    if (j >= 0 && j < ids.length) { [ids[i], ids[j]] = [ids[j], ids[i]]; flipRender(() => { favorites = new Set(ids); saveFavorites(); }); peopleEl.querySelector('[data-id="' + CSS.escape(li.dataset.id) + '"] .fav')?.focus(); }
+    // 一覧に出ているお気に入りの中で、となりの人と入れ替える。
+    e.preventDefault(); const ids = [...favorites], shown = visibleFavs().map(p => p.id), at = shown.indexOf(li.dataset.id), next = shown[at + (e.key === 'ArrowUp' ? -1 : 1)];
+    const i = ids.indexOf(li.dataset.id), j = next ? ids.indexOf(next) : -1;
+    if (j >= 0) { [ids[i], ids[j]] = [ids[j], ids[i]]; flipRender(() => { favorites = new Set(ids); saveFavorites(); }); peopleEl.querySelector('[data-id="' + CSS.escape(li.dataset.id) + '"] .fav')?.focus(); }
   }
 });
 document.addEventListener('keydown', e => {
