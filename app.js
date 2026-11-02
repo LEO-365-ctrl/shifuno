@@ -1575,42 +1575,110 @@ function modalError(modal, text, shakeEl) {
 }
 const doneToast = text => hideToastLater(showToast({ text }), 4500);
 
-// 送る：月を選ぶ（今月以降の登録済みの月をはじめから選んでおく）→ スマホの共有画面（LINE など）。
+// 送る：月を選ぶ（今月、なければ近い先の月をはじめから選んでおく）→ スマホの共有画面（LINE など）。
+// 月はホイールで1つ選ぶ（登録した月が増えても一覧がごちゃつかない）。
 // 共有画面はタップの直後に開く必要があるので、送る文字は月を選んだ時点で先に作っておく。
 const shareModal = $('.share-modal');
-let shareKeys = new Set(), shareText = null, shareBuild = 0;
+const WHEEL_ROW = 36;
+let shareList = [], shareText = null, shareBuild = 0;
+// idx は決まった位置、live は回している途中で真ん中にある位置。raf が動いている間はこちらで回している。
+const wheel = { el: shareModal.querySelector('.wheel'), idx: 0, live: -1, raf: 0, timer: 0 };
+const wheelNearest = () => Math.max(0, Math.min(shareList.length - 1, Math.round(wheel.el.scrollTop / WHEEL_ROW)));
+// 真ん中からの距離に合わせて、筒に貼ったように傾けて薄くする。
+function paintWheel() {
+  const pos = wheel.el.scrollTop / WHEEL_ROW, items = wheel.el.children;
+  for (let i = 0; i < items.length; i++) {
+    const d = Math.max(-3, Math.min(3, i - pos)), a = Math.abs(d);
+    items[i].style.transform = `perspective(260px) rotateX(${-d * 24}deg) scale(${1 - a * .06})`;
+    items[i].style.opacity = String(Math.max(.18, 1 - a * .3));
+  }
+  const n = wheelNearest();
+  if (n === wheel.live) return;
+  items[wheel.live]?.classList.remove('on'); items[wheel.live]?.setAttribute('aria-selected', 'false');
+  items[n]?.classList.add('on'); items[n]?.setAttribute('aria-selected', 'true');
+  wheel.live = n;
+}
+function rollWheel(i, { from = wheel.el.scrollTop / WHEEL_ROW, dur, delay = 0 } = {}) {
+  cancelAnimationFrame(wheel.raf);
+  const el = wheel.el, a = from * WHEEL_ROW, b = i * WHEEL_ROW;
+  if (reduced() || Math.abs(b - a) < 1) { wheel.raf = 0; el.classList.remove('is-rolling'); el.scrollTop = b; paintWheel(); return; }
+  dur ??= Math.min(560, 260 + Math.abs(b - a) / WHEEL_ROW * 60);
+  el.classList.add('is-rolling');
+  el.scrollTop = a;
+  const t0 = performance.now() + delay;
+  const step = now => {
+    const t = Math.max(0, Math.min(1, (now - t0) / dur));
+    el.scrollTop = a + (b - a) * (1 - Math.pow(1 - t, 3));
+    if (t < 1) { wheel.raf = requestAnimationFrame(step); return; }
+    wheel.raf = 0; el.classList.remove('is-rolling');
+  };
+  wheel.raf = requestAnimationFrame(step);
+}
+// 月を決める。帯を光らせ、決まった月を小さく弾ませる。
+function pickWheel(i, roll) {
+  if (roll) rollWheel(i);
+  if (i === wheel.idx) return;
+  wheel.idx = i;
+  if (!reduced()) {
+    const box = wheel.el.parentElement;
+    box.classList.add('is-nudged'); setTimeout(() => box.classList.remove('is-nudged'), 220);
+    wheel.el.children[i]?.animate([{ scale: 1 }, { scale: 1.1, offset: .4 }, { scale: 1 }], { duration: 320, easing: EASE });
+  }
+  $('.share-fallback').hidden = true;
+  rebuildShare();
+}
+{
+  const stop = () => { if (wheel.raf) { cancelAnimationFrame(wheel.raf); wheel.raf = 0; wheel.el.classList.remove('is-rolling'); } };
+  const settle = () => { clearTimeout(wheel.timer); if (!wheel.raf && shareList.length) pickWheel(wheelNearest(), false); };
+  wheel.el.addEventListener('scroll', () => {
+    paintWheel();
+    clearTimeout(wheel.timer);
+    if (!wheel.raf) wheel.timer = setTimeout(settle, 140);
+  }, { passive: true });
+  wheel.el.addEventListener('scrollend', settle);
+  wheel.el.addEventListener('pointerdown', stop);
+  wheel.el.addEventListener('wheel', stop, { passive: true });
+  wheel.el.addEventListener('click', e => {
+    const it = e.target.closest('.wheel-item');
+    if (it) pickWheel(Number(it.dataset.i), true);
+  });
+  wheel.el.addEventListener('keydown', e => {
+    const last = shareList.length - 1;
+    const i = { ArrowDown: wheel.idx + 1, ArrowUp: wheel.idx - 1, PageDown: wheel.idx + 3, PageUp: wheel.idx - 3, Home: 0, End: last }[e.key];
+    if (i === undefined) return;
+    e.preventDefault();
+    pickWheel(Math.max(0, Math.min(last, i)), true);
+  });
+}
 function openShareSend() {
   const months = shareMonths();
   if (!months.length) { hideToastLater(showToast({ text: 'まだ共有できるシフトがありません<br><small>先にシフトを登録してください。</small>', warn: true }), 4500); return; }
-  const ahead = months.filter(k => k >= today.key);
-  shareKeys = new Set(ahead.length ? ahead : [months.at(-1)]);
-  $('.share-months').innerHTML = months.map(k => `<button type="button" data-key="${k}" aria-pressed="${shareKeys.has(k)}">${esc(fmtMonth(k))}</button>`).join('');
+  shareList = months;
+  const ahead = months.findIndex(k => k >= today.key), last = months.length - 1;
+  wheel.idx = ahead >= 0 ? ahead : last;
+  wheel.el.innerHTML = months.map((k, i) => `<div class="wheel-item" role="option" aria-selected="false" data-i="${i}">${esc(fmtMonth(k))}</div>`).join('');
+  wheel.live = -1;
   $('.share-fallback').hidden = true; $('.share-fallback').value = '';
   modalError(shareModal, '');
   rebuildShare();
   showSheetModal(shareModal, $('.share-yes'));
+  // 開くときは2段ずらした所から、選んである月までくるっと回して止める。
+  const from = !last ? wheel.idx : wheel.idx >= 2 ? wheel.idx - 2 : Math.min(last, wheel.idx + 2);
+  wheel.el.scrollTop = from * WHEEL_ROW; paintWheel();
+  rollWheel(wheel.idx, { from, dur: 700, delay: 110 });
 }
 function rebuildShare() {
-  const run = ++shareBuild, keys = [...shareKeys].sort();
+  const run = ++shareBuild, key = shareList[wheel.idx];
   shareText = null;
-  $('.share-yes').disabled = !keys.length;
-  const names = new Set(keys.flatMap(k => shareRows(k).map(r => r[0])));
-  $('.share-note').innerHTML = keys.length ? `${keys.map(k => `${Number(k.slice(5))}月`).join('・')}の勤務表（${names.size}人分）を送ります` : '送る月を選んでください';
-  if (!keys.length) return;
-  encodeShare(keys).then(code => {
-    if (run === shareBuild) shareText = `シフノのシフト（${keys.map(fmtMonth).join('・')}）\nシフノを開いて「＋シフトを登録」→「共有を受け取る」に、このメッセージをまるごと貼り付けてください。\n${code}`;
+  $('.share-yes').disabled = !key;
+  const note = $('.share-note');
+  note.innerHTML = key ? `${Number(key.slice(5))}月の勤務表（${shareRows(key).length}人分）を送ります` : '送る月を選んでください';
+  if (shareModal.open && !reduced()) note.animate([{ opacity: .3, transform: 'translateY(3px)' }, { opacity: 1, transform: 'none' }], { duration: 240, easing: EASE });
+  if (!key) return;
+  encodeShare([key]).then(code => {
+    if (run === shareBuild) shareText = `シフノのシフト（${fmtMonth(key)}）\nシフノを開いて「＋シフトを登録」→「共有を受け取る」に、このメッセージをまるごと貼り付けてください。\n${code}`;
   }, () => { if (run === shareBuild) modalError(shareModal, '共有する文字を作れませんでした。もう一度お試しください。'); });
 }
-$('.share-months').addEventListener('click', e => {
-  const b = e.target.closest('button[data-key]');
-  if (!b) return;
-  const on = !shareKeys.has(b.dataset.key);
-  if (on) shareKeys.add(b.dataset.key); else shareKeys.delete(b.dataset.key);
-  b.setAttribute('aria-pressed', String(on));
-  if (!reduced()) b.animate([{ transform: 'scale(1)' }, { transform: on ? 'scale(1.1)' : 'scale(.92)', offset: .45 }, { transform: 'none' }], { duration: 300, easing: EASE });
-  $('.share-fallback').hidden = true;
-  rebuildShare();
-});
 async function sendShare() {
   const text = shareText;
   if (!text) return;
